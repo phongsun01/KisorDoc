@@ -246,16 +246,20 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
         if progress:
             progress((i + 1) / total, desc=f"Đang xử lý: {tpl_name}")
         try:
-            # FIX 3: dùng mail_merge_safe có error handling
-            ok, err = mail_merge_safe(src_path, nested_context, src_path)
-            if not ok:
-                raise RuntimeError(err)
-
+            # FIX: Process table copy FIRST before mail_merge
+            # This way table placeholders are replaced with actual tables
+            # before mail_merge tries to process them as text
             if danh_muc_file and danh_muc_file.exists():
                 try:
                     copy_tables_for_file(src_path, config, goi_thau_id, tables_rows, danh_muc_file)
                 except Exception as table_err:
                     print(f"⚠️  Lỗi copy bảng: {table_err}")
+
+            # Then do mail merge on remaining placeholders
+            # FIX 3: dùng mail_merge_safe có error handling
+            ok, err = mail_merge_safe(src_path, nested_context, src_path)
+            if not ok:
+                raise RuntimeError(err)
 
             new_path = rename_output(src_path, goi_thau_id, used_names)
             results.append(f"✅ {tpl_name} → {new_path.name}")
@@ -316,6 +320,9 @@ def create_ui():
 
         # Tab 3: Log & Kết quả
         with gr.Tab("2. Log & Kết quả"):
+            # Add progress bar
+            progress_bar = gr.Progress(label="Tiến độ xử lý")
+            
             # FIX #4: Replace Dataframe with Textbox for better log display
             result_log = gr.Textbox(
                 label="Chi tiết kết quả",
