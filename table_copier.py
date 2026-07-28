@@ -104,15 +104,33 @@ def _normalize_placeholder_key(raw: str) -> str:
 
 def _match_word(tables_word: str, file_stem: str) -> bool:
     """
-    FIX: Matching chặt hơn — ưu tiên exact match, sau đó startswith.
-    Bỏ 't in f' để tránh khớp nhầm.
+    FIX: Matching more lenient - partial match instead of exact.
+    Handle variations in naming conventions.
     """
     t = tables_word.strip().lower()
     f = file_stem.strip().lower()
-    # Bỏ số thứ tự đầu nếu có: "3. yeu cau bao gia" → "yeu cau bao gia"
+    
+    # Remove leading numbers: "3. yeu cau" → "yeu cau"
     f_no_prefix = re.sub(r"^\d+\.\s*", "", f)
     t_no_prefix = re.sub(r"^\d+\.\s*", "", t)
-    return t == f or t == f_no_prefix or t_no_prefix == f or t_no_prefix == f_no_prefix
+    
+    # Exact match (best)
+    if t == f or t == f_no_prefix or t_no_prefix == f or t_no_prefix == f_no_prefix:
+        return True
+    
+    # Partial match - check if one contains the other (handle variations)
+    # e.g., "4. BB HDMS.1" matches "4. BB HDMS" or "BB HDMS"
+    if len(t) > 3 and len(f) > 3:
+        # Remove special chars for comparison
+        t_clean = re.sub(r"[^\w\s]", "", t_no_prefix)
+        f_clean = re.sub(r"[^\w\s]", "", f_no_prefix)
+        
+        # Check if one contains the other (at least 5 chars)
+        if len(t_clean) > 5 and len(f_clean) > 5:
+            if t_clean in f_clean or f_clean in t_clean:
+                return True
+    
+    return False
 
 
 def _collect_table_placeholders(doc: Document, valid_keys: set) -> dict[str, list]:
@@ -299,12 +317,16 @@ def _insert_table_at_paragraph(doc: Document, para_element, ws_data):
     row_heights = ws_data.get("row_heights", {})
     col_widths = ws_data.get("col_widths", {})
 
-    tbl = _create_word_table_xml(nrows, ncols, rows_data, merged, row_heights, col_widths)
-    parent = para_element.getparent()
-    if parent is not None:
-        idx = list(parent).index(para_element)
-        parent.remove(para_element)
-        parent.insert(idx, tbl)
+    try:
+        tbl = _create_word_table_xml(nrows, ncols, rows_data, merged, row_heights, col_widths)
+        parent = para_element.getparent()
+        if parent is not None:
+            idx = list(parent).index(para_element)
+            parent.remove(para_element)
+            parent.insert(idx, tbl)
+    except Exception as e:
+        print(f"⚠️  Lỗi tạo bảng XML: {e}")
+        # Keep the placeholder if table creation fails, don't delete it
 
 
 def _create_word_table_xml(nrows, ncols, rows_data, merged, row_heights, col_widths):
