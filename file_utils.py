@@ -1,16 +1,35 @@
 import os
 import shutil
 import re
+import time
 from pathlib import Path
 
 from config import AppConfig
 
 
 def clear_output_folder(config: AppConfig):
+    """Clear output folder with retry logic for file locks"""
     output = config.output_path
-    if output.exists():
-        shutil.rmtree(output)
-    output.mkdir(parents=True, exist_ok=True)
+    if not output.exists():
+        output.mkdir(parents=True, exist_ok=True)
+        return
+    
+    # Try to remove with retries
+    max_retries = 5
+    retry_delay = 0.5  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            shutil.rmtree(output)
+            output.mkdir(parents=True, exist_ok=True)
+            return
+        except PermissionError as e:
+            if attempt < max_retries - 1:
+                print(f"⚠️  Thư mục bị khóa, thử lại ({attempt + 1}/{max_retries})...")
+                time.sleep(retry_delay)
+            else:
+                print(f"❌ Không thể xóa thư mục sau {max_retries} lần: {e}")
+                raise
 
 
 def copy_templates_to_output(config: AppConfig, option: str, filenames: list[str]) -> list[Path]:

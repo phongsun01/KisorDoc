@@ -341,22 +341,26 @@ def _create_word_table_xml(nrows, ncols, rows_data, merged, row_heights, col_wid
     tblW.set(f"{{{NS}}}type", "pct")
 
     tblGrid = etree.SubElement(table_xml, f"{{{NS}}}tblGrid")
+    
+    # FIX: Better column width handling
+    # Calculate total width and apply proportionally
+    if col_widths:
+        total_width = sum(col_widths.values())
+        # Target table width in twips (6 inches = 8640 twips)
+        target_width = 8640
+        width_per_unit = target_width / max(total_width, 1)
+    else:
+        width_per_unit = 1440 / ncols  # Default equal widths
+    
     for ci in range(ncols):
         gridCol = etree.SubElement(tblGrid, f"{{{NS}}}gridCol")
         cw = col_widths.get(ci)
         
-        # FIX: Better column width conversion
-        # Excel width is in character units (1 unit ≈ 7 pixels at 96 DPI)
-        # Word width is in twips (1/20 point, where 1 point ≈ 1.33 pixels)
-        # Formula: twips = (chars * 7 + 5) * 20 ≈ chars * 140 + 100
-        # Simplified: twips ≈ chars * 256 (more accurate for typical fonts)
         if cw and cw > 0:
-            # Use a direct pixel-to-twips conversion
-            # 1 pixel ≈ 20 twips (at 96 DPI)
-            # Excel char width ≈ 7 pixels
-            twips = max(200, int(cw * 7 * 20))  # min 200 twips (~0.28 inches)
+            # Use proportional width
+            twips = max(200, int(cw * width_per_unit))
         else:
-            twips = 1440  # Default 1 inch
+            twips = int(target_width / ncols) if col_widths else 1440
             
         gridCol.set(f"{{{NS}}}w", str(twips))
 
