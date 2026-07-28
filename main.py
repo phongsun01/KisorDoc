@@ -216,6 +216,15 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
 
     nested_context = make_nested_dict(context)
 
+    # Add table placeholder names to context to prevent docxtpl from deleting them
+    # These will be replaced by actual tables in copy_tables_for_file()
+    if tables_rows:
+        for table_row in tables_rows:
+            placeholder_name = _str(table_row.get("Name", ""))
+            if placeholder_name:
+                # Add empty string so docxtpl doesn't delete the placeholder
+                nested_context[placeholder_name] = ""
+
     xlsx_files = sorted(config.data_path.glob("*.xlsx"))
     danh_muc_file = next(
         (f for f in xlsx_files if "DanhMuc" in f.stem or "danh muc" in f.stem.lower()),
