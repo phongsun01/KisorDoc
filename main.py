@@ -263,55 +263,56 @@ def create_ui():
 
     # Dùng dict mutable để lưu lựa chọn hiện tại
     _sel = {"opt": "", "pkg": ""}
-    _processing = {"running": False}
 
     with gr.Blocks(title=config.AppName) as app:
         gr.Markdown(f"# {config.AppName} – Xử lý Word tự động")
 
-        # FIX #1: Wrap tabs với gr.Tabs để control programmatically
-        with gr.Tabs() as tabs:
-            with gr.Tab("1. Chọn quy trình & Gói thầu", id="tab1"):
-                options = get_options()
-                option_radio = gr.Radio(choices=options, label="Chọn quy trình")
+        # Tab 1: Chọn quy trình & Gói thầu
+        with gr.Tab("1. Chọn quy trình & Gói thầu"):
+            options = get_options()
+            option_radio = gr.Radio(choices=options, label="Chọn quy trình")
 
-                goi_thau_rows = ds.query("SELECT * FROM GoiThau ORDER BY CAST(TT AS INTEGER)")
-                packages = []
-                for r in goi_thau_rows:
-                    packages.append(f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}")
-                package_radio = gr.Radio(choices=packages, label="Chọn gói thầu")
+            goi_thau_rows = ds.query("SELECT * FROM GoiThau ORDER BY CAST(TT AS INTEGER)")
+            packages = []
+            for r in goi_thau_rows:
+                packages.append(f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}")
+            package_radio = gr.Radio(choices=packages, label="Chọn gói thầu")
 
-                # FIX #9: Add package preview
-                with gr.Group():
-                    gr.Markdown("**Preview thông tin gói thầu:**")
-                    pkg_preview = gr.Textbox(label="", interactive=False, max_lines=4)
+            # FIX #9: Add package preview
+            with gr.Group():
+                gr.Markdown("**Preview thông tin gói thầu:**")
+                pkg_preview = gr.Textbox(label="", interactive=False, max_lines=4)
 
-                submit_btn = gr.Button("📥 Tiếp theo", variant="primary")
+            submit_btn = gr.Button("📥 Tiếp theo", variant="primary")
+            submit_status = gr.Textbox(label="", interactive=False, visible=False)
 
-            with gr.Tab("2. Chọn file template", id="tab2"):
-                # FIX #10: Add count to checkbox label
-                template_label = gr.Markdown("**Chọn template cần xử lý** (0 file)")
-                template_checkboxes = gr.CheckboxGroup(label="", choices=[])
-                
-                with gr.Row():
-                    select_all_btn = gr.Button("✓ Chọn tất cả")
-                    deselect_all_btn = gr.Button("✗ Bỏ chọn tất cả")
-                
-                run_btn = gr.Button("🚀 Chạy", variant="primary", size="lg")
+        # Tab 2: Chọn file template
+        with gr.Tab("2. Chọn file template"):
+            # FIX #10: Add count to checkbox label
+            template_label = gr.Markdown("**Chọn template cần xử lý** (0 file)")
+            template_checkboxes = gr.CheckboxGroup(label="", choices=[])
+            
+            with gr.Row():
+                select_all_btn = gr.Button("✓ Chọn tất cả")
+                deselect_all_btn = gr.Button("✗ Bỏ chọn tất cả")
+            
+            run_btn = gr.Button("🚀 Chạy", variant="primary", size="lg")
 
-            with gr.Tab("3. Log & Kết quả", id="tab3"):
-                # FIX #4: Replace Dataframe with Textbox for better log display
-                result_log = gr.Textbox(
-                    label="Chi tiết kết quả",
-                    interactive=False,
-                    lines=15,
-                    max_lines=20,
-                )
-                status_text = gr.Textbox(label="Trạng thái", interactive=False)
-                
-                with gr.Row():
-                    # FIX #12: Open folder button only shown after run
-                    open_folder_btn = gr.Button("📂 Mở thư mục output", visible=False)
-                    rerun_btn = gr.Button("← Chạy lại", variant="secondary")
+        # Tab 3: Log & Kết quả
+        with gr.Tab("3. Log & Kết quả"):
+            # FIX #4: Replace Dataframe with Textbox for better log display
+            result_log = gr.Textbox(
+                label="Chi tiết kết quả",
+                interactive=False,
+                lines=15,
+                max_lines=20,
+            )
+            status_text = gr.Textbox(label="Trạng thái", interactive=False)
+            
+            with gr.Row():
+                # FIX #12: Open folder button only shown after run
+                open_folder_btn = gr.Button("📂 Mở thư mục output", visible=False)
+                rerun_btn = gr.Button("← Chạy lại", variant="secondary")
 
         # FIX #2 & #9: Update preview when package changes
         def on_package_change(pkg):
@@ -323,21 +324,22 @@ def create_ui():
 
         package_radio.change(fn=on_package_change, inputs=[package_radio], outputs=[pkg_preview])
 
-        # FIX #1: Submit loads templates AND switches to tab 2
+        # FIX #1: Submit loads templates
         def on_submit_load_templates(opt, pkg):
             _sel["opt"] = opt or ""
             _sel["pkg"] = pkg or ""
+            if not opt or not pkg:
+                return gr.update(choices=[], value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)"), "❌ Vui lòng chọn quy trình và gói thầu"
             templates = get_workflow_templates(opt, pkg)
             choices = [t.get("Name", "") for t in templates]
-            # Update checkbox label with count (FIX #10)
             label_text = f"**Chọn template cần xử lý** ({len(choices)} file)"
-            return gr.update(choices=choices, value=[]), gr.update(value=label_text)
+            return gr.update(choices=choices, value=[]), gr.update(value=label_text), f"✅ Đã tải {len(choices)} template từ '{pkg}'"
 
         submit_btn.click(
             fn=on_submit_load_templates,
             inputs=[option_radio, package_radio],
-            outputs=[template_checkboxes, template_label],
-        ).then(lambda: None, js="document.querySelector('[id=\"tab2\"]').click();")  # Switch to tab 2
+            outputs=[template_checkboxes, template_label, submit_status],
+        )
 
         # FIX #10: Update label when checkbox changes
         def update_checkbox_label():
@@ -370,8 +372,6 @@ def create_ui():
             if not templates or len(templates) == 0:
                 return "", "❌ Vui lòng chọn ít nhất 1 template", gr.update(visible=False)
             
-            # Mark as processing
-            _processing["running"] = True
             return None, None, gr.update(visible=False)  # Trigger actual run_batch
 
         # FIX #3: Disable button during processing (use trigger_mode="once")
@@ -385,16 +385,9 @@ def create_ui():
             inputs=[option_radio, package_radio, template_checkboxes],
             outputs=[result_log, status_text],
         ).then(
-            lambda: (gr.update(visible=True), gr.update(interactive=True), _processing.update({"running": False})),
-            outputs=[open_folder_btn, run_btn]
+            lambda: gr.update(visible=True),
+            outputs=[open_folder_btn]
         )
-
-        # FIX #4: Format log output with colors (simulated with emoji)
-        def format_log_output(results, status):
-            if not results:
-                return "", status
-            formatted = "\n".join(results) if isinstance(results, list) else str(results)
-            return formatted, status
 
         def on_open_folder():
             open_output_folder(config)
@@ -405,13 +398,19 @@ def create_ui():
         def on_rerun():
             _sel["opt"] = ""
             _sel["pkg"] = ""
-            _processing["running"] = False
-            return gr.update(value=""), gr.update(value=""), gr.update(value=[]), gr.update(value=""), gr.update(visible=False)
+            return (
+                gr.update(value=""),
+                gr.update(value=""),
+                gr.update(value=[]),
+                gr.update(value=""),
+                gr.update(visible=False),
+                gr.update(value="")
+            )
 
         rerun_btn.click(
             fn=on_rerun,
-            outputs=[option_radio, package_radio, template_checkboxes, pkg_preview, open_folder_btn],
-        ).then(lambda: None, js="document.querySelector('[id=\"tab1\"]').click();")  # Switch to tab 1
+            outputs=[option_radio, package_radio, template_checkboxes, pkg_preview, open_folder_btn, result_log],
+        )
 
     return app
 
