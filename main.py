@@ -201,6 +201,11 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
             raw_value = raw_value.strftime("%d/%m/%Y")
         elif raw_value is None:
             raw_value = ""
+        else:
+            # Handle pandas NaT or other special values
+            import pandas as pd
+            if pd.isna(raw_value):
+                raw_value = ""
         context[clean_key] = str(raw_value)
 
     nested_context = make_nested_dict(context)
