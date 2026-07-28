@@ -320,8 +320,9 @@ def create_ui():
 
         # Tab 3: Log & Kết quả
         with gr.Tab("2. Log & Kết quả"):
-            # Add progress bar
-            progress_bar = gr.Progress(label="Tiến độ xử lý")
+            gr.Markdown("### Tiến độ & Kết quả")
+            # Add progress bar (no label parameter)
+            progress_bar = gr.Progress()
             
             # FIX #4: Replace Dataframe with Textbox for better log display
             result_log = gr.Textbox(
