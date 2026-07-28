@@ -1,7 +1,7 @@
 # PRD – Word Batch Processor (KisorDoc-AI)
-**Phiên bản:** 2.1  
-**Ngày:** 2026-07-27  
-**Trạng thái:** Final Draft
+**Phiên bản:** 2.2  
+**Ngày:** 2026-07-28  
+**Trạng thái:** Production Ready (ver1.3)
 
 ---
 
@@ -375,27 +375,84 @@ Xử lý tuần tự từng occurrence (từ cuối document lên đầu
 
 ## 8. Giao diện (Web app local – Gradio)
 
-### Tab 1: Chọn Option & Gói thầu
+### Tab 1: Chọn quy trình & Gói thầu
+
+**Tính năng:**
 - Radio button chọn Option (Opt1 / Opt2) từ sheet Options
-- Radio button chọn Gói thầu từ sheet GoiThau
-- Nút Submit
+- Radio button chọn Gói thầu từ sheet GoiThau, sorted by TT (thứ tự)
+- **✨ FIX #9:** Preview thông tin gói thầu (Tên CĐT, Giá, Loại, Số hiệu) hiển thị khi chọn
+- Nút "📥 Tiếp theo" → load template và hiển thị feedback (✅ hoặc ❌)
+
+**UX improvements (ver1.3):**
+- Package preview tự update khi user chọn gói thầu khác
+- Hiển thị trạng thái load ("✅ Đã tải 8 template từ '...'")
 
 ### Tab 2: Chọn file template
-- Checkbox list các template đã lọc (theo option, giá, type)
-- Nút "Chọn tất cả" / "Bỏ chọn tất cả"
-- Nút Back để quay lại tab 1
-- Nút Chạy
+
+**Tính năng:**
+- **✨ FIX #10:** Checkbox list các template đã lọc (theo option, giá, type), label hiển thị số template: "**Chọn template cần xử lý** (8 file)"
+- Nút "✓ Chọn tất cả" / "✗ Bỏ chọn tất cả"
+- Nút "🚀 Chạy" (size=lg, variant=primary)
+
+**UX improvements (ver1.3):**
+- Label tự update khi checkbox thay đổi
+- Không cần nút "Back" — user chỉ cần click Tab 1 nếu muốn quay lại
 
 ### Tab 3: Log & Kết quả
-- Progress bar xử lý từng file
-- Log lần chạy hiện tại
-- ⚠️ Warnings: placeholder không có data
-- ❌ Errors: lỗi đọc file, lỗi copy bảng
-- Hiển thị runtime + nút mở output folder
+
+**Tính năng:**
+- **✨ FIX #4:** Chi tiết kết quả hiển thị trong Textbox (15-20 lines) thay vì Dataframe
+  - Mỗi dòng: `✅ {Tên file} → {File output}` hoặc `❌ {Tên file}: {Lý do lỗi}`
+- Status box: "Hoàn thành 5/8 file trong 12.3s"
+- **✨ FIX #12:** Nút "📂 Mở thư mục output" chỉ visible sau khi chạy thành công
+- **✨ FIX #8:** Nút "← Chạy lại" reset tất cả form + clear kết quả cũ → quay Tab 1
+
+**UX improvements (ver1.3):**
+- Textbox dễ copy log, clear khi chạy lại
+- Nút open folder chỉ hiện lúc cần (tránh nhầm lẫn khi folder rỗng)
 
 ---
 
-## 9. Báo cáo sau khi chạy
+## 8.1 UX Improvements (ver1.3)
+
+### Validation & Error Handling
+
+**FIX #2 – Input Validation before Run:**
+- User clicks "🚀 Chạy" → validation function checks:
+  - ❌ Option không chọn → "❌ Vui lòng chọn quy trình"
+  - ❌ Gói thầu không chọn → "❌ Vui lòng chọn gói thầu"
+  - ❌ Template không chọn → "❌ Vui lòng chọn ít nhất 1 template"
+- Nếu lỗi → hiển thị thông báo trong status box, không chạy
+
+**FIX #3 – Processing State:**
+- Khi nhấn "Chạy" → nút disable (trigger_mode="once")
+- Tránh click 2 lần → 2 batch chạy song song → file corrupt
+- Sau khi xong → nút re-enable
+
+**FIX #9 – Package Data Preview:**
+- Khi user chọn gói thầu → preview hiển thị:
+  ```
+  Tên CĐT: Bệnh viện Sản Nhi tỉnh Quảng Ninh
+  Giá: 150.000.000
+  Loại: XD
+  Số hiệu: XLNT
+  ```
+- Tránh nhầm lẫn chọn gói sai
+
+**FIX #5 – Package Sorting:**
+- Danh sách gói thầu sort by TT (số thứ tự) — dễ tìm theo thứ tự
+
+---
+
+## 8.2 Bug Fixes (ver1.3+)
+
+**NaT (Not a Time) Handling:**
+- Fix lỗi `ValueError: NaTType does not support strftime` khi datetime field rỗng trong Excel
+- Xử lý: check `pd.isna()` trước khi format ngày → nếu NaT → set giá trị = ""
+
+---
+
+
 
 | Loại | Nội dung |
 |---|---|
@@ -431,15 +488,17 @@ File JSON tại `%LOCALAPPDATA%\UiPathProjectConfigs\Config-5.txt`:
 
 ## 11. Stack kỹ thuật
 
-| Thành phần | Thư viện | Lý do |
-|---|---|---|
-| Mail merge Word | `docxtpl` (v0.20+) | Xử lý runs bị split sẵn; dùng Jinja2 filter cho modifier; không cần tự parse XML |
-| Đọc/ghi Word (copy bảng) | `python-docx` + `lxml` trực tiếp | lxml cho insert bảng đúng vị trí placeholder, xử lý vMerge/gridSpan |
-| Load DataSet (sheet data) | `duckdb` + extension `excel` | Đọc `.xlsx` trực tiếp bằng SQL, không cần openpyxl cho phần này; nhanh, ít RAM |
-| Đọc Excel (copy bảng `S.*`) | `openpyxl` (read_only=False) | Cần `merged_cells`, `column_dimensions`, `row_dimensions`, `cell.font` — duckdb không có |
-| Giao diện | `Gradio` | Web local, không cần cài Node/React |
-| Cấu hình | `json` + `pydantic` | Validate schema Config-5.txt |
-| Đóng gói | `PyInstaller` | 1 file `.exe` |
+| Thành phần | Thư viện | Phiên bản | Lý do |
+|---|---|---|---|
+| Mail merge Word | `docxtpl` | 0.20+ | Xử lý runs bị split sẵn; dùng Jinja2 filter cho modifier; không cần tự parse XML |
+| Đọc/ghi Word (copy bảng) | `python-docx` + `lxml` | - | lxml cho insert bảng đúng vị trí placeholder, xử lý vMerge/gridSpan |
+| Load DataSet (sheet data) | `duckdb` + extension `excel` | - | Đọc `.xlsx` trực tiếp bằng SQL, không cần openpyxl cho phần này; nhanh, ít RAM |
+| Đọc Excel (copy bảng `S.*`) | `openpyxl` | read_only=False | Cần `merged_cells`, `column_dimensions`, `row_dimensions`, `cell.font` — duckdb không có |
+| Giao diện | `Gradio` | 4.0+ | Web local, không cần cài Node/React; async support cho progress bar |
+| Cấu hình | `.env` + `pydantic` | - | Validate schema config; dotenv load từ `.env` (không cần cấu hình hệ thống) |
+| Đóng gói | `PyInstaller` | - | 1 file `.exe` cho deployment |
+| Async framework | `asyncio` | - | Support async function trong Gradio (`async def run_batch`) |
+| Pandas | `pandas` | - | Handle NaT (Not a Time), data manipulation |
 
 > ⚠️ **Lưu ý phân chia openpyxl vs duckdb:**
 > - **DuckDB excel extension** → dùng cho sheet data thông thường (GoiThau, Options, Workflow, Config, Tables): đọc nhanh, query SQL JOIN dễ.
