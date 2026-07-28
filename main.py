@@ -13,7 +13,7 @@ import gradio as gr
 from config import load_config, AppConfig
 from dataset import DataSet
 from file_utils import clear_output_folder, copy_templates_to_output, rename_output, open_output_folder
-from merger import mail_merge
+from merger import mail_merge_safe
 from table_copier import copy_tables_for_file, TABLE_PLACEHOLDER_RE
 
 config: AppConfig | None = None
@@ -49,13 +49,6 @@ def get_packages(option_key: str) -> list[str]:
         label = f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}"
         packages.append(label)
     return packages
-    if val is None:
-        return ""
-    if isinstance(val, float):
-        import math
-        if math.isnan(val):
-            return ""
-    return str(val).strip()
 
 def get_workflow_templates(option_key: str, package_label: str) -> list[dict]:
     if not option_key:
@@ -134,16 +127,26 @@ def make_nested_dict(flat_dict: dict) -> dict:
 
 
 async def run_batch(option_key: str, package_label: str, selected_templates: list[str],
-                    progress: gr.Progress = gr.Progress()):
-    config = load_config()
-    ds_local = DataSet(config)
+                          progress=None):
+    """
+    Version đã fix: dùng global config + ds thay vì khởi tạo lại.
+    Copy hàm này vào main.py, thay thế run_batch() cũ.
+    """
+    import time, traceback
+    from datetime import datetime
+    import gradio as gr
+    from file_utils import clear_output_folder, copy_templates_to_output, rename_output, open_output_folder
+    from merger import mail_merge_safe  # dùng version có error handling (FIX 3)
+    from table_copier import copy_tables_for_file
+
+    global config, ds  # FIX 2: dùng global thay vì tạo mới
 
     opt = option_key.split(":")[0].strip() if ":" in option_key else option_key
 
-    goi_thau_rows = ds_local.query("SELECT * FROM GoiThau")
+    goi_thau_rows = ds.query("SELECT * FROM GoiThau")
     selected_pkg = None
     for r in goi_thau_rows:
-        label = f"{r.get('TT', '')}. {r.get('Số hiệu gói thầu', '')} - {r.get('Tên gói thầu', '')}"
+        label = f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}"
         if label == package_label:
             selected_pkg = r
             break
@@ -152,32 +155,26 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
         yield [], "❌ Không tìm thấy gói thầu đã chọn"
         return
 
-    goi_thau_id = str(selected_pkg.get("GoiThau_ID", ""))
+    goi_thau_id = _str(selected_pkg.get("GoiThau_ID"))
+    config_rows = ds.query("SELECT * FROM Config")   # FIX 2: ds thay vì ds_local
+    tables_rows = ds.query("SELECT * FROM Tables")   # FIX 2
 
-    config_rows = ds_local.query("SELECT * FROM Config")
     context = {}
     for r in config_rows:
-        key = str(r.get("Key", "")).strip()
-        col = str(r.get("Value", "")).strip()
+        key = _str(r.get("Key"))
+        col = _str(r.get("Value"))
         if not key or not col:
             continue
-            
-        # Dọn dẹp key từ Config sheet để có tên biến sạch (ví dụ: <<KHLCNT_TTr.Date>> -> KHLCNT_TTr_Date)
-        clean_key = key
-        if clean_key.startswith("<<") and clean_key.endswith(">>"):
-            clean_key = clean_key[2:-2].strip()
-        elif clean_key.startswith("{{") and clean_key.endswith("}}"):
-            clean_key = clean_key[2:-2].strip()
-            
-        if clean_key.endswith(".Date.Long"):
-            clean_key = clean_key[:-10] + "_Date"
-        elif clean_key.endswith(".Date"):
-            clean_key = clean_key[:-5] + "_Date"
-        elif clean_key.endswith(".Upper"):
-            clean_key = clean_key[:-6]
-        elif clean_key.endswith(".Number"):
-            clean_key = clean_key[:-7]
-            
+        clean_key = key.strip("<>{}| ")
+        # Normalize modifier suffix
+        for suffix in (".Date.Long", ".Date", ".Upper", ".Number"):
+            if clean_key.endswith(suffix):
+                clean_key = clean_key[: -len(suffix)]
+                if suffix == ".Date.Long":
+                    clean_key += "_Date"
+                elif suffix == ".Date":
+                    clean_key += "_Date"
+                break
         if "|" in clean_key:
             clean_key = clean_key.split("|")[0].strip()
 
@@ -188,57 +185,98 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
             raw_value = ""
         context[clean_key] = str(raw_value)
 
-    # Chuyển đổi flat dictionary (dạng "Cha.Con") thành nested dictionary để Jinja2 phân tích đúng
     nested_context = make_nested_dict(context)
 
-    tables_rows = ds_local.query("SELECT * FROM Tables")
     xlsx_files = sorted(config.data_path.glob("*.xlsx"))
-    danh_muc_file = None
-    for f in xlsx_files:
-        if "DanhMuc" in f.stem or "danh muc" in f.stem.lower():
-            danh_muc_file = f
-            break
-    if danh_muc_file is None and xlsx_files:
-        danh_muc_file = xlsx_files[0]
+    danh_muc_file = next(
+        (f for f in xlsx_files if "DanhMuc" in f.stem or "danh muc" in f.stem.lower()),
+        xlsx_files[0] if xlsx_files else None
+    )
 
-    progress(0, desc="Bắt đầu xử lý...")
+    if progress:
+        progress(0, desc="Bắt đầu xử lý...")
     yield [], "Bắt đầu..."
 
     clear_output_folder(config)
 
-    template_filenames = []
-    template_names = []
+    template_filenames, template_names = [], []
     for r in get_workflow_templates(option_key, package_label):
         if r.get("Name", "") in selected_templates:
-            fname_raw = str(r.get("File", "")).strip()
-            fname = fname_raw + ".docx" if not fname_raw.endswith(".docx") else fname_raw
+            fname_raw = _str(r.get("File", ""))
+            fname = fname_raw if fname_raw.endswith(".docx") else fname_raw + ".docx"
             template_filenames.append(fname)
             template_names.append(r.get("Name", ""))
 
     copied = copy_templates_to_output(config, opt, template_filenames)
     total = len(copied)
     results = []
-    used_names = set()
+    used_names: set[str] = set()
     start_time = time.time()
 
     for i, (src_path, tpl_name) in enumerate(zip(copied, template_names)):
-        progress((i + 1) / total, desc=f"Đang xử lý: {tpl_name}")
-
+        if progress:
+            progress((i + 1) / total, desc=f"Đang xử lý: {tpl_name}")
         try:
+            # FIX 3: dùng mail_merge_safe có error handling
+            ok, err = mail_merge_safe(src_path, nested_context, src_path)
+            if not ok:
+                raise RuntimeError(err)
+
             if danh_muc_file and danh_muc_file.exists():
                 copy_tables_for_file(src_path, config, goi_thau_id, tables_rows, danh_muc_file)
-            mail_merge(src_path, nested_context, src_path)
 
             new_path = rename_output(src_path, goi_thau_id, used_names)
             results.append(f"✅ {tpl_name} → {new_path.name}")
         except Exception as e:
-            tb = traceback.format_exc()
             results.append(f"❌ {tpl_name}: {e}")
-            yield results, f"Lỗi tại {tpl_name}: {e}"
+
+        yield results, f"Đang xử lý {i + 1}/{total}..."
 
     elapsed = time.time() - start_time
-    summary = f"Hoàn thành {len([r for r in results if r.startswith('✅')])}/{total} file trong {elapsed:.1f}s"
+    ok_count = sum(1 for r in results if r.startswith("✅"))
+    summary = f"Hoàn thành {ok_count}/{total} file trong {elapsed:.1f}s"
     yield results, summary
+
+
+# ─────────────────────────────────────────────
+# FIX 3: merger.py — thêm mail_merge_safe() với error handling
+# Thêm hàm này vào merger.py:
+# ─────────────────────────────────────────────
+
+MERGER_PATCH = '''
+def mail_merge_safe(template_path, context: dict, output_path) -> tuple[bool, str]:
+    """
+    FIX 3: Version có error handling — không corrupt file nếu Jinja2 lỗi.
+    Returns (success: bool, error_message: str)
+    """
+    import tempfile, shutil
+    from pathlib import Path
+    tmp = Path(tempfile.mktemp(suffix=".docx"))
+    try:
+        doc = DocxTemplate(str(template_path))
+        jenv = jinja2.Environment()
+        jenv.filters["date"]      = filter_date
+        jenv.filters["date_long"] = filter_date_long
+        jenv.filters["number"]    = filter_number
+        doc.render(context, jenv)
+        doc.save(str(tmp))
+        # Chỉ ghi đè file gốc sau khi render thành công
+        shutil.move(str(tmp), str(output_path))
+        return True, ""
+    except Exception as e:
+        if tmp.exists():
+            tmp.unlink()
+        return False, str(e)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except Exception:
+                pass
+'''
+
+print("Xem nội dung MERGER_PATCH để thêm vào merger.py")
+
 
 
 def create_ui():
