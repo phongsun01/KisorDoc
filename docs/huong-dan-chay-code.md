@@ -79,3 +79,23 @@ KisorDoc-AI running at http://127.0.0.1:7864
 ### Lỗi 3: Không tìm thấy gói thầu/lỗi đọc Excel
 * **Nguyên nhân:** Đường dẫn `PROJECT_PATH` trong file `.env` hoặc `Config-5.txt` đang cấu hình sai, dẫn đến việc công cụ không tìm thấy thư mục chứa file Excel `1. Data/`.
 * **Khắc phục:** Kiểm tra lại đường dẫn tuyệt đối của thư mục dự án trong cấu hình.
+
+### Lỗi 4: `Python was not found; run without arguments to install...`
+* **Nguyên nhân:** Python chưa được thêm vào biến môi trường PATH của hệ thống, hoặc alias mặc định của Microsoft Store đang chặn lệnh `python`.
+* **Khắc phục:** Bạn có thể áp dụng 1 trong 3 cách sau:
+  1. **Tắt App Execution Aliases:** Vào **Settings > Apps > Advanced app settings > App execution aliases** (hoặc tìm kiếm cụm từ này trong Windows Search) và tắt (Toggle OFF) `python.exe` và `python3.exe`.
+  2. **Sử dụng bộ chạy phụ trợ (Python Launcher):** Chạy lệnh sử dụng lệnh `py` thay vì `python`:
+     ```bash
+     py -m venv .venv
+     py main.py
+     ```
+  3. **Chạy bằng đường dẫn tuyệt đối:** Sử dụng đường dẫn trực tiếp tới thư mục cài đặt Python trên máy của bạn (Ví dụ trên máy của bạn):
+     - **Trên PowerShell:**
+       ```powershell
+       & "C:\Users\Desktop\AppData\Local\Programs\Python\Python313\python.exe" -m venv .venv
+       ```
+     - **Trên Command Prompt (cmd):**
+       ```cmd
+       "C:\Users\Desktop\AppData\Local\Programs\Python\Python313\python.exe" -m venv .venv
+       ```
+
