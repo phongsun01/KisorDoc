@@ -292,9 +292,6 @@ def create_ui():
                         gr.Markdown("**Preview thông tin gói thầu:**")
                         pkg_preview = gr.Textbox(label="", interactive=False, max_lines=4)
 
-                    submit_btn = gr.Button("📥 Tiếp theo", variant="primary")
-                    submit_status = gr.Textbox(label="", interactive=False, visible=False)
-
                 # Column 2: Tab 2 - Chọn file template & Chạy
                 with gr.Column(scale=1):
                     gr.Markdown("### Chọn file template & Chạy")
@@ -324,31 +321,47 @@ def create_ui():
                 open_folder_btn = gr.Button("📂 Mở thư mục output", visible=False)
                 rerun_btn = gr.Button("← Chạy lại", variant="secondary")
 
-        # FIX #2 & #9: Update preview when package changes
+        # FIX #1: Auto-load templates when package is selected (no submit button needed)
         def on_package_change(pkg):
             details = get_package_details(pkg)
             if not details:
-                return ""
-            lines = [f"{k}: {v}" for k, v in details.items() if v]
-            return "\n".join(lines)
-
-        package_radio.change(fn=on_package_change, inputs=[package_radio], outputs=[pkg_preview])
-
-        # FIX #1: Submit loads templates
-        def on_submit_load_templates(opt, pkg):
-            _sel["opt"] = opt or ""
-            _sel["pkg"] = pkg or ""
+                preview_text = ""
+            else:
+                lines = [f"{k}: {v}" for k, v in details.items() if v]
+                preview_text = "\n".join(lines)
+            
+            # Auto-load templates when package is selected
+            opt = _sel["opt"]
             if not opt or not pkg:
-                return gr.update(choices=[], value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)"), "❌ Vui lòng chọn quy trình và gói thầu"
+                return preview_text, gr.update(choices=[], value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)")
+            
             templates = get_workflow_templates(opt, pkg)
             choices = [t.get("Name", "") for t in templates]
             label_text = f"**Chọn template cần xử lý** ({len(choices)} file)"
-            return gr.update(choices=choices, value=[]), gr.update(value=label_text), f"✅ Đã tải {len(choices)} template từ '{pkg}'"
+            _sel["pkg"] = pkg
+            
+            return preview_text, gr.update(choices=choices, value=[]), gr.update(value=label_text)
 
-        submit_btn.click(
-            fn=on_submit_load_templates,
-            inputs=[option_radio, package_radio],
-            outputs=[template_checkboxes, template_label, submit_status],
+        package_radio.change(
+            fn=on_package_change,
+            inputs=[package_radio],
+            outputs=[pkg_preview, template_checkboxes, template_label]
+        )
+
+        # When option changes, clear package and templates
+        def on_option_change(opt):
+            _sel["opt"] = opt or ""
+            return (
+                gr.update(value=None),  # Reset package
+                gr.update(choices=[], value=[]),  # Clear templates
+                gr.update(value="**Chọn template cần xử lý** (0 file)"),  # Reset label
+                ""  # Clear preview
+            )
+
+        option_radio.change(
+            fn=on_option_change,
+            inputs=[option_radio],
+            outputs=[package_radio, template_checkboxes, template_label, pkg_preview]
         )
 
         # FIX #10: Update label when checkbox changes
