@@ -337,10 +337,10 @@ def create_ui():
             fn=on_submit_load_templates,
             inputs=[option_radio, package_radio],
             outputs=[template_checkboxes, template_label],
-        ).then(lambda: None, _js="document.querySelector('#tab2').click();")  # Switch to tab 2
+        ).then(lambda: None, js="document.querySelector('[id=\"tab2\"]').click();")  # Switch to tab 2
 
         # FIX #10: Update label when checkbox changes
-        def update_checkbox_label(checked_items):
+        def update_checkbox_label():
             total = len(get_workflow_templates(_sel["opt"], _sel["pkg"]))
             return gr.update(value=f"**Chọn template cần xử lý** ({total} file)")
 
@@ -411,7 +411,7 @@ def create_ui():
         rerun_btn.click(
             fn=on_rerun,
             outputs=[option_radio, package_radio, template_checkboxes, pkg_preview, open_folder_btn],
-        ).then(lambda: None, _js="document.querySelector('#tab1').click();")  # Switch to tab 1
+        ).then(lambda: None, js="document.querySelector('[id=\"tab1\"]').click();")  # Switch to tab 1
 
     return app
 
@@ -420,6 +420,17 @@ if __name__ == "__main__":
     app = create_ui()
     import webbrowser
     PORT = 7864
+    # Try to find an available port
+    import socket
+    while True:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.bind(('127.0.0.1', PORT))
+            sock.close()
+            break
+        except OSError:
+            PORT += 1
+    
     threading.Thread(target=lambda: webbrowser.open(f"http://127.0.0.1:{PORT}"), daemon=True).start()
     print(f"KisorDoc-AI running at http://127.0.0.1:{PORT}")
     app.launch(server_port=PORT, share=False, quiet=True, inbrowser=False)
