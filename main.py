@@ -175,7 +175,12 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
 
     goi_thau_id = _str(selected_pkg.get("GoiThau_ID"))
     config_rows = ds.query("SELECT * FROM Config")   # FIX 2: ds thay vì ds_local
-    tables_rows = ds.query("SELECT * FROM Tables")   # FIX 2
+    
+    # Query Tables sheet - check if it exists first
+    try:
+        tables_rows = ds.query("SELECT * FROM Tables")   # FIX 2
+    except Exception:
+        tables_rows = []  # If Tables sheet doesn't exist, skip table copying
 
     context = {}
     for r in config_rows:
@@ -246,7 +251,10 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
                 raise RuntimeError(err)
 
             if danh_muc_file and danh_muc_file.exists():
-                copy_tables_for_file(src_path, config, goi_thau_id, tables_rows, danh_muc_file)
+                try:
+                    copy_tables_for_file(src_path, config, goi_thau_id, tables_rows, danh_muc_file)
+                except Exception as table_err:
+                    print(f"⚠️  Lỗi copy bảng: {table_err}")
 
             new_path = rename_output(src_path, goi_thau_id, used_names)
             results.append(f"✅ {tpl_name} → {new_path.name}")
