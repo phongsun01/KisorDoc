@@ -272,39 +272,44 @@ def create_ui():
     with gr.Blocks(title=config.AppName) as app:
         gr.Markdown(f"# {config.AppName} – Xử lý Word tự động")
 
-        # Tab 1: Chọn quy trình & Gói thầu
-        with gr.Tab("1. Chọn quy trình & Gói thầu"):
-            options = get_options()
-            option_radio = gr.Radio(choices=options, label="Chọn quy trình")
-
-            goi_thau_rows = ds.query("SELECT * FROM GoiThau ORDER BY CAST(TT AS INTEGER)")
-            packages = []
-            for r in goi_thau_rows:
-                packages.append(f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}")
-            package_radio = gr.Radio(choices=packages, label="Chọn gói thầu")
-
-            # FIX #9: Add package preview
-            with gr.Group():
-                gr.Markdown("**Preview thông tin gói thầu:**")
-                pkg_preview = gr.Textbox(label="", interactive=False, max_lines=4)
-
-            submit_btn = gr.Button("📥 Tiếp theo", variant="primary")
-            submit_status = gr.Textbox(label="", interactive=False, visible=False)
-
-        # Tab 2: Chọn file template
-        with gr.Tab("2. Chọn file template"):
-            # FIX #10: Add count to checkbox label
-            template_label = gr.Markdown("**Chọn template cần xử lý** (0 file)")
-            template_checkboxes = gr.CheckboxGroup(label="", choices=[])
-            
+        # Tab 1 & 2: Merged into 2-column layout
+        with gr.Tab("1. Chọn & Chạy"):
             with gr.Row():
-                select_all_btn = gr.Button("✓ Chọn tất cả")
-                deselect_all_btn = gr.Button("✗ Bỏ chọn tất cả")
-            
-            run_btn = gr.Button("🚀 Chạy", variant="primary", size="lg")
+                # Column 1: Tab 1 - Chọn quy trình & Gói thầu
+                with gr.Column(scale=1):
+                    gr.Markdown("### Chọn quy trình & Gói thầu")
+                    options = get_options()
+                    option_radio = gr.Radio(choices=options, label="Chọn quy trình")
+
+                    goi_thau_rows = ds.query("SELECT * FROM GoiThau ORDER BY CAST(TT AS INTEGER)")
+                    packages = []
+                    for r in goi_thau_rows:
+                        packages.append(f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}")
+                    package_radio = gr.Radio(choices=packages, label="Chọn gói thầu")
+
+                    # FIX #9: Add package preview
+                    with gr.Group():
+                        gr.Markdown("**Preview thông tin gói thầu:**")
+                        pkg_preview = gr.Textbox(label="", interactive=False, max_lines=4)
+
+                    submit_btn = gr.Button("📥 Tiếp theo", variant="primary")
+                    submit_status = gr.Textbox(label="", interactive=False, visible=False)
+
+                # Column 2: Tab 2 - Chọn file template & Chạy
+                with gr.Column(scale=1):
+                    gr.Markdown("### Chọn file template & Chạy")
+                    # FIX #10: Add count to checkbox label
+                    template_label = gr.Markdown("**Chọn template cần xử lý** (0 file)")
+                    template_checkboxes = gr.CheckboxGroup(label="", choices=[])
+                    
+                    with gr.Row():
+                        select_all_btn = gr.Button("✓ Chọn tất cả")
+                        deselect_all_btn = gr.Button("✗ Bỏ chọn tất cả")
+                    
+                    run_btn = gr.Button("🚀 Chạy", variant="primary", size="lg")
 
         # Tab 3: Log & Kết quả
-        with gr.Tab("3. Log & Kết quả"):
+        with gr.Tab("2. Log & Kết quả"):
             # FIX #4: Replace Dataframe with Textbox for better log display
             result_log = gr.Textbox(
                 label="Chi tiết kết quả",
@@ -394,18 +399,29 @@ def create_ui():
             outputs=[open_folder_btn]
         )
 
+        # FIX #2: Open folder - add error handling
         def on_open_folder():
-            open_output_folder(config)
+            try:
+                open_output_folder(config)
+                return "✅ Thư mục đã mở"
+            except Exception as e:
+                return f"❌ Lỗi mở thư mục: {e}"
 
-        open_folder_btn.click(fn=on_open_folder)
+        open_folder_btn.click(fn=on_open_folder, outputs=[status_text])
 
-        # FIX #8: Rerun button resets to Tab 1
+        # FIX #3: Rerun button - reset Radio values properly
         def on_rerun():
             _sel["opt"] = ""
             _sel["pkg"] = ""
+            # Get initial choices for radio buttons
+            initial_options = get_options()
+            initial_packages = []
+            for r in ds.query("SELECT * FROM GoiThau ORDER BY CAST(TT AS INTEGER)"):
+                initial_packages.append(f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}")
+            
             return (
-                gr.update(value=""),
-                gr.update(value=""),
+                gr.update(choices=initial_options, value=None),  # Reset to None instead of ""
+                gr.update(choices=initial_packages, value=None),  # Reset to None instead of ""
                 gr.update(value=[]),
                 gr.update(value=""),
                 gr.update(visible=False),
