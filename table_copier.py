@@ -48,6 +48,7 @@ def copy_tables_for_file(
         and _match_word(str(t.get("Word", "")), file_stem)
     ]
     if not matching_tables:
+        print(f"⚠️  Không tìm thấy bảng nào cho file '{file_stem}' và gói thầu '{goi_thau_id}'")
         return
 
     # FIX 1: Build set placeholder keys từ tables_data thay vì hardcode
@@ -321,7 +322,13 @@ def _create_word_table_xml(nrows, ncols, rows_data, merged, row_heights, col_wid
     for ci in range(ncols):
         gridCol = etree.SubElement(tblGrid, f"{{{NS}}}gridCol")
         cw = col_widths.get(ci)
-        twips = int(cw * 96 * 914400 / 72 / 10000) if cw else 1440
+        # FIX: Better column width conversion
+        # Excel width is in character units; Word width is in twips (1/20 point)
+        # Simple conversion: twips = chars * 20 * 14.4 ≈ chars * 288
+        if cw:
+            twips = max(100, int(cw * 288))  # Min 100 twips to avoid too narrow columns
+        else:
+            twips = 1440  # Default ~1 inch
         gridCol.set(f"{{{NS}}}w", str(twips))
 
     # FIX 2: Build master cell lookup để biết đâu là master, đâu là phụ
