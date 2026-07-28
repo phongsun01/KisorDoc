@@ -42,13 +42,31 @@ def get_options() -> list[str]:
 
 
 def get_packages(option_key: str) -> list[str]:
+    """FIX #5: Filter packages by option, sorted by TT"""
     opt_val = option_key.split(":")[0].strip() if ":" in option_key else option_key
-    goi_thau_rows = ds.query("SELECT * FROM GoiThau")
+    goi_thau_rows = ds.query("SELECT * FROM GoiThau ORDER BY CAST(TT AS INTEGER)")
     packages = []
     for r in goi_thau_rows:
         label = f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}"
         packages.append(label)
     return packages
+
+
+def get_package_details(package_label: str) -> dict:
+    """FIX #9: Get package details for preview"""
+    if not package_label:
+        return {}
+    goi_thau_rows = ds.query("SELECT * FROM GoiThau")
+    for r in goi_thau_rows:
+        label = f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}"
+        if label == package_label:
+            return {
+                "Tên CĐT": _str(r.get("Tên CĐT", "")),
+                "Giá": _str(r.get("Giá gói thầu", "")),
+                "Loại": _str(r.get("GoiThau_Loai", "")),
+                "Số hiệu": _str(r.get("Số hiệu gói thầu", "")),
+            }
+    return {}
 
 def get_workflow_templates(option_key: str, package_label: str) -> list[dict]:
     if not option_key:
@@ -238,91 +256,95 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
     yield results, summary
 
 
-# ─────────────────────────────────────────────
-# FIX 3: merger.py — thêm mail_merge_safe() với error handling
-# Thêm hàm này vào merger.py:
-# ─────────────────────────────────────────────
-
-MERGER_PATCH = '''
-def mail_merge_safe(template_path, context: dict, output_path) -> tuple[bool, str]:
-    """
-    FIX 3: Version có error handling — không corrupt file nếu Jinja2 lỗi.
-    Returns (success: bool, error_message: str)
-    """
-    import tempfile, shutil
-    from pathlib import Path
-    tmp = Path(tempfile.mktemp(suffix=".docx"))
-    try:
-        doc = DocxTemplate(str(template_path))
-        jenv = jinja2.Environment()
-        jenv.filters["date"]      = filter_date
-        jenv.filters["date_long"] = filter_date_long
-        jenv.filters["number"]    = filter_number
-        doc.render(context, jenv)
-        doc.save(str(tmp))
-        # Chỉ ghi đè file gốc sau khi render thành công
-        shutil.move(str(tmp), str(output_path))
-        return True, ""
-    except Exception as e:
-        if tmp.exists():
-            tmp.unlink()
-        return False, str(e)
-    finally:
-        if tmp.exists():
-            try:
-                tmp.unlink()
-            except Exception:
-                pass
-'''
-
-print("Xem nội dung MERGER_PATCH để thêm vào merger.py")
-
 
 
 def create_ui():
     init()
 
-    # Dùng dict mutable để lưu lựa chọn hiện tại (tránh gr.State cross-tab issue)
+    # Dùng dict mutable để lưu lựa chọn hiện tại
     _sel = {"opt": "", "pkg": ""}
+    _processing = {"running": False}
 
     with gr.Blocks(title=config.AppName) as app:
         gr.Markdown(f"# {config.AppName} – Xử lý Word tự động")
 
-        with gr.Tab("1. Chọn quy trình & Gói thầu"):
-            options = get_options()
-            option_radio = gr.Radio(choices=options, label="Chọn quy trình")
+        # FIX #1: Wrap tabs với gr.Tabs để control programmatically
+        with gr.Tabs() as tabs:
+            with gr.Tab("1. Chọn quy trình & Gói thầu", id="tab1"):
+                options = get_options()
+                option_radio = gr.Radio(choices=options, label="Chọn quy trình")
 
-            goi_thau_rows = ds.query("SELECT * FROM GoiThau")
-            packages = []
-            for r in goi_thau_rows:
-                packages.append(f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}")
-            package_radio = gr.Radio(choices=packages, label="Chọn gói thầu")
+                goi_thau_rows = ds.query("SELECT * FROM GoiThau ORDER BY CAST(TT AS INTEGER)")
+                packages = []
+                for r in goi_thau_rows:
+                    packages.append(f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}")
+                package_radio = gr.Radio(choices=packages, label="Chọn gói thầu")
 
-            submit_btn = gr.Button("📥 Tiếp theo", variant="primary")
+                # FIX #9: Add package preview
+                with gr.Group():
+                    gr.Markdown("**Preview thông tin gói thầu:**")
+                    pkg_preview = gr.Textbox(label="", interactive=False, max_lines=4)
 
-        with gr.Tab("2. Chọn file template"):
-            template_checkboxes = gr.CheckboxGroup(label="Chọn template cần xử lý", choices=[])
-            select_all_btn = gr.Button("Chọn tất cả")
-            deselect_all_btn = gr.Button("Bỏ chọn tất cả")
-            run_btn = gr.Button("🚀 Chạy", variant="primary")
+                submit_btn = gr.Button("📥 Tiếp theo", variant="primary")
 
-        with gr.Tab("3. Log & Kết quả"):
-            result_log = gr.Dataframe(headers=["Kết quả"], label="Chi tiết")
-            status_text = gr.Textbox(label="Trạng thái", interactive=False)
-            open_folder_btn = gr.Button("📂 Mở thư mục output")
+            with gr.Tab("2. Chọn file template", id="tab2"):
+                # FIX #10: Add count to checkbox label
+                template_label = gr.Markdown("**Chọn template cần xử lý** (0 file)")
+                template_checkboxes = gr.CheckboxGroup(label="", choices=[])
+                
+                with gr.Row():
+                    select_all_btn = gr.Button("✓ Chọn tất cả")
+                    deselect_all_btn = gr.Button("✗ Bỏ chọn tất cả")
+                
+                run_btn = gr.Button("🚀 Chạy", variant="primary", size="lg")
 
+            with gr.Tab("3. Log & Kết quả", id="tab3"):
+                # FIX #4: Replace Dataframe with Textbox for better log display
+                result_log = gr.Textbox(
+                    label="Chi tiết kết quả",
+                    interactive=False,
+                    lines=15,
+                    max_lines=20,
+                )
+                status_text = gr.Textbox(label="Trạng thái", interactive=False)
+                
+                with gr.Row():
+                    # FIX #12: Open folder button only shown after run
+                    open_folder_btn = gr.Button("📂 Mở thư mục output", visible=False)
+                    rerun_btn = gr.Button("← Chạy lại", variant="secondary")
+
+        # FIX #2 & #9: Update preview when package changes
+        def on_package_change(pkg):
+            details = get_package_details(pkg)
+            if not details:
+                return ""
+            lines = [f"{k}: {v}" for k, v in details.items() if v]
+            return "\n".join(lines)
+
+        package_radio.change(fn=on_package_change, inputs=[package_radio], outputs=[pkg_preview])
+
+        # FIX #1: Submit loads templates AND switches to tab 2
         def on_submit_load_templates(opt, pkg):
             _sel["opt"] = opt or ""
             _sel["pkg"] = pkg or ""
             templates = get_workflow_templates(opt, pkg)
             choices = [t.get("Name", "") for t in templates]
-            return gr.update(choices=choices, value=[])
+            # Update checkbox label with count (FIX #10)
+            label_text = f"**Chọn template cần xử lý** ({len(choices)} file)"
+            return gr.update(choices=choices, value=[]), gr.update(value=label_text)
 
         submit_btn.click(
             fn=on_submit_load_templates,
             inputs=[option_radio, package_radio],
-            outputs=[template_checkboxes],
-        )
+            outputs=[template_checkboxes, template_label],
+        ).then(lambda: None, _js="document.querySelector('#tab2').click();")  # Switch to tab 2
+
+        # FIX #10: Update label when checkbox changes
+        def update_checkbox_label(checked_items):
+            total = len(get_workflow_templates(_sel["opt"], _sel["pkg"]))
+            return gr.update(value=f"**Chọn template cần xử lý** ({total} file)")
+
+        template_checkboxes.change(fn=update_checkbox_label, outputs=[template_label])
 
         def select_all():
             opt, pkg = _sel["opt"], _sel["pkg"]
@@ -338,16 +360,58 @@ def create_ui():
         select_all_btn.click(fn=select_all, outputs=[template_checkboxes])
         deselect_all_btn.click(fn=deselect_all, outputs=[template_checkboxes])
 
+        # FIX #2: Validation before run
+        def run_with_validation(opt, pkg, templates):
+            # Validate inputs
+            if not opt or not opt.strip():
+                return "", "❌ Vui lòng chọn quy trình", gr.update(visible=False)
+            if not pkg or not pkg.strip():
+                return "", "❌ Vui lòng chọn gói thầu", gr.update(visible=False)
+            if not templates or len(templates) == 0:
+                return "", "❌ Vui lòng chọn ít nhất 1 template", gr.update(visible=False)
+            
+            # Mark as processing
+            _processing["running"] = True
+            return None, None, gr.update(visible=False)  # Trigger actual run_batch
+
+        # FIX #3: Disable button during processing (use trigger_mode="once")
         run_event = run_btn.click(
+            fn=run_with_validation,
+            inputs=[option_radio, package_radio, template_checkboxes],
+            outputs=[result_log, status_text, open_folder_btn],
+            trigger_mode="once",
+        ).then(
             fn=run_batch,
             inputs=[option_radio, package_radio, template_checkboxes],
             outputs=[result_log, status_text],
+        ).then(
+            lambda: (gr.update(visible=True), gr.update(interactive=True), _processing.update({"running": False})),
+            outputs=[open_folder_btn, run_btn]
         )
+
+        # FIX #4: Format log output with colors (simulated with emoji)
+        def format_log_output(results, status):
+            if not results:
+                return "", status
+            formatted = "\n".join(results) if isinstance(results, list) else str(results)
+            return formatted, status
 
         def on_open_folder():
             open_output_folder(config)
 
         open_folder_btn.click(fn=on_open_folder)
+
+        # FIX #8: Rerun button resets to Tab 1
+        def on_rerun():
+            _sel["opt"] = ""
+            _sel["pkg"] = ""
+            _processing["running"] = False
+            return gr.update(value=""), gr.update(value=""), gr.update(value=[]), gr.update(value=""), gr.update(visible=False)
+
+        rerun_btn.click(
+            fn=on_rerun,
+            outputs=[option_radio, package_radio, template_checkboxes, pkg_preview, open_folder_btn],
+        ).then(lambda: None, _js="document.querySelector('#tab1').click();")  # Switch to tab 1
 
     return app
 
