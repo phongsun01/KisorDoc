@@ -2,21 +2,31 @@ import os
 import shutil
 import re
 import time
+import subprocess
 from pathlib import Path
 
 from config import AppConfig
 
 
 def clear_output_folder(config: AppConfig):
-    """Clear output folder with retry logic for file locks"""
+    """Clear output folder with Word process killing and retry logic"""
     output = config.output_path
+    
+    # Force close Word processes to avoid file locks
+    try:
+        subprocess.run(['taskkill', '/F', '/IM', 'WINWORD.EXE'], 
+                      capture_output=True, timeout=5)
+        time.sleep(1)  # Wait for processes to fully terminate
+    except Exception:
+        pass  # If taskkill fails, continue anyway
+    
     if not output.exists():
         output.mkdir(parents=True, exist_ok=True)
         return
     
     # Try to remove with retries
     max_retries = 5
-    retry_delay = 0.5  # seconds
+    retry_delay = 1.0  # Increased to 1 second
     
     for attempt in range(max_retries):
         try:
@@ -29,6 +39,7 @@ def clear_output_folder(config: AppConfig):
                 time.sleep(retry_delay)
             else:
                 print(f"❌ Không thể xóa thư mục sau {max_retries} lần: {e}")
+                print(f"💡 Vui lòng đóng tất cả file Word và thử lại")
                 raise
 
 

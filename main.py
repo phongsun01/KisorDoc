@@ -431,6 +431,7 @@ def create_ui():
             fn=run_batch,
             inputs=[option_radio, package_radio, template_checkboxes],
             outputs=[result_log, status_text],
+            show_progress="full",  # Enable progress bar
         ).then(
             lambda: gr.update(visible=True),
             outputs=[open_folder_btn]

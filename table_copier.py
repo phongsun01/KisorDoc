@@ -342,25 +342,21 @@ def _create_word_table_xml(nrows, ncols, rows_data, merged, row_heights, col_wid
 
     tblGrid = etree.SubElement(table_xml, f"{{{NS}}}tblGrid")
     
-    # FIX: Better column width handling
-    # Calculate total width and apply proportionally
-    if col_widths:
-        total_width = sum(col_widths.values())
-        # Target table width in twips (6 inches = 8640 twips)
-        target_width = 8640
-        width_per_unit = target_width / max(total_width, 1)
-    else:
-        width_per_unit = 1440 / ncols  # Default equal widths
+    # FIX: Excel column width to Word twips conversion
+    # After testing: Excel width * 143 gives closest match
+    # Excel default width unit is based on "0" character width in Calibri 11pt
+    # 1 Excel width unit ≈ 7 pixels at 96 DPI ≈ 143 twips
     
     for ci in range(ncols):
         gridCol = etree.SubElement(tblGrid, f"{{{NS}}}gridCol")
         cw = col_widths.get(ci)
         
         if cw and cw > 0:
-            # Use proportional width
-            twips = max(200, int(cw * width_per_unit))
+            # Direct conversion: Excel width * 143 = Word twips
+            twips = max(200, int(cw * 143))
         else:
-            twips = int(target_width / ncols) if col_widths else 1440
+            # Default 1 inch if no width specified
+            twips = 1440
             
         gridCol.set(f"{{{NS}}}w", str(twips))
 
