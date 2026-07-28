@@ -6,3 +6,4 @@ pydantic>=2.0.0
 lxml>=5.0.0
 pandas>=2.0.0
 python-dotenv>=1.0.0
+docxtpl>=0.20.0

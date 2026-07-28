@@ -61,7 +61,16 @@ def copy_tables_for_file(
         placeholder_occurrences[key].append(t)
 
     for placeholder_key, occurrences in placeholder_occurrences.items():
-        doc_occurrences = doc_tables.get(placeholder_key, [])
+        # Chuẩn hóa key từ Excel (chấp nhận DanhMuc, {DanhMuc}, {{DanhMuc}}) thành {{DanhMuc}}
+        norm_key = placeholder_key.strip() if placeholder_key else ""
+        if norm_key:
+            if not norm_key.startswith("{{"):
+                if norm_key.startswith("{") and norm_key.endswith("}"):
+                    norm_key = "{" + norm_key + "}"
+                else:
+                    norm_key = "{{" + norm_key + "}}"
+        
+        doc_occurrences = doc_tables.get(norm_key, [])
         if not doc_occurrences:
             continue
 

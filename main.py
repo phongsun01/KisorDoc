@@ -117,6 +117,22 @@ def _parse_price(val) -> float | None:
         return None
 
 
+def make_nested_dict(flat_dict: dict) -> dict:
+    nested = {}
+    for key, value in flat_dict.items():
+        parts = key.split(".")
+        d = nested
+        for part in parts[:-1]:
+            if part not in d:
+                d[part] = {}
+            elif not isinstance(d[part], dict):
+                # Fallback if there is a clash
+                d[part] = {"_val": d[part]}
+            d = d[part]
+        d[parts[-1]] = value
+    return nested
+
+
 async def run_batch(option_key: str, package_label: str, selected_templates: list[str],
                     progress: gr.Progress = gr.Progress()):
     config = load_config()
@@ -139,21 +155,41 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
     goi_thau_id = str(selected_pkg.get("GoiThau_ID", ""))
 
     config_rows = ds_local.query("SELECT * FROM Config")
-    config_map = {}
+    context = {}
     for r in config_rows:
         key = str(r.get("Key", "")).strip()
-        value = str(r.get("Value", "")).strip()
-        if key:
-            config_map[key] = value
+        col = str(r.get("Value", "")).strip()
+        if not key or not col:
+            continue
+            
+        # Dọn dẹp key từ Config sheet để có tên biến sạch (ví dụ: <<KHLCNT_TTr.Date>> -> KHLCNT_TTr_Date)
+        clean_key = key
+        if clean_key.startswith("<<") and clean_key.endswith(">>"):
+            clean_key = clean_key[2:-2].strip()
+        elif clean_key.startswith("{{") and clean_key.endswith("}}"):
+            clean_key = clean_key[2:-2].strip()
+            
+        if clean_key.endswith(".Date.Long"):
+            clean_key = clean_key[:-10] + "_Date"
+        elif clean_key.endswith(".Date"):
+            clean_key = clean_key[:-5] + "_Date"
+        elif clean_key.endswith(".Upper"):
+            clean_key = clean_key[:-6]
+        elif clean_key.endswith(".Number"):
+            clean_key = clean_key[:-7]
+            
+        if "|" in clean_key:
+            clean_key = clean_key.split("|")[0].strip()
 
-    context = {}
-    for key, col in config_map.items():
         raw_value = selected_pkg.get(col, "")
         if isinstance(raw_value, datetime):
             raw_value = raw_value.strftime("%d/%m/%Y")
         elif raw_value is None:
             raw_value = ""
-        context[key] = str(raw_value)
+        context[clean_key] = str(raw_value)
+
+    # Chuyển đổi flat dictionary (dạng "Cha.Con") thành nested dictionary để Jinja2 phân tích đúng
+    nested_context = make_nested_dict(context)
 
     tables_rows = ds_local.query("SELECT * FROM Tables")
     xlsx_files = sorted(config.data_path.glob("*.xlsx"))
@@ -189,7 +225,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
         progress((i + 1) / total, desc=f"Đang xử lý: {tpl_name}")
 
         try:
-            mail_merge(src_path, context, src_path)
+            mail_merge(src_path, nested_context, src_path)
             if danh_muc_file and danh_muc_file.exists():
                 copy_tables_for_file(src_path, config, goi_thau_id, tables_rows, danh_muc_file)
 
@@ -274,7 +310,7 @@ def create_ui():
 if __name__ == "__main__":
     app = create_ui()
     import webbrowser
-    PORT = 7863
+    PORT = 7864
     threading.Thread(target=lambda: webbrowser.open(f"http://127.0.0.1:{PORT}"), daemon=True).start()
     print(f"KisorDoc-AI running at http://127.0.0.1:{PORT}")
     app.launch(server_port=PORT, share=False, quiet=True, inbrowser=False)

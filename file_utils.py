@@ -59,4 +59,11 @@ def _sanitize_filename(name: str) -> str:
 
 
 def open_output_folder(config: AppConfig):
-    os.startfile(config.output_path)
+    try:
+        path = str(config.output_path.resolve())
+        if os.path.exists(path):
+            os.startfile(path)
+        else:
+            print(f"Output folder does not exist: {path}")
+    except Exception as e:
+        print(f"Error opening output folder: {e}")

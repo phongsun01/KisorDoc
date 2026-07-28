@@ -44,8 +44,22 @@ def load_config() -> AppConfig:
     with open(config_file, encoding="utf-8") as f:
         data = json.load(f)
 
-    project_path = os.environ.get("PROJECT_PATH")
-    if project_path:
-        data["ProjectPath"] = project_path
+    env_mapping = {
+        "PROJECT_PATH": "ProjectPath",
+        "ONLINE_MODE": "OnlineMode",
+        "DATA_FOLDER": "DataFolder",
+        "TEMPLATE_FOLDER": "TemplateFolder",
+        "FILE_FOLDER": "FileFolder",
+        "DATA_SHEET": "DataSheet",
+        "CLOSE_WORD": "CloseWord",
+        "TASK_MANAGER_PROCESS": "TaskManagerProcess",
+        "AGENT_PATH": "AgentPath",
+        "EXCEPTION_SHEET": "ExceptionSheet",
+        "APP_NAME": "AppName",
+    }
+    for env_key, config_key in env_mapping.items():
+        val = os.environ.get(env_key)
+        if val is not None:
+            data[config_key] = val
 
     return AppConfig(**data)
