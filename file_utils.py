@@ -62,7 +62,7 @@ def open_output_folder(config: AppConfig):
     try:
         path = str(config.output_path.resolve())
         if os.path.exists(path):
-            os.startfile(path)
+            os.system(f'start "" "{path}"')
         else:
             print(f"Output folder does not exist: {path}")
     except Exception as e:

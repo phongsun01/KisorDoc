@@ -66,7 +66,7 @@ def get_workflow_templates(option_key: str, package_label: str) -> list[dict]:
         return []
 
     ws_rows = ds.query("SELECT * FROM Workflow")
-    wf_rows = [r for r in ws_rows if _str(r.get("Option")) == opt or not _str(r.get("Option"))]
+    wf_rows = [r for r in ws_rows if _str(r.get("Option")) == opt]
     if not wf_rows:
         return []
 
@@ -225,9 +225,9 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
         progress((i + 1) / total, desc=f"Đang xử lý: {tpl_name}")
 
         try:
-            mail_merge(src_path, nested_context, src_path)
             if danh_muc_file and danh_muc_file.exists():
                 copy_tables_for_file(src_path, config, goi_thau_id, tables_rows, danh_muc_file)
+            mail_merge(src_path, nested_context, src_path)
 
             new_path = rename_output(src_path, goi_thau_id, used_names)
             results.append(f"✅ {tpl_name} → {new_path.name}")
@@ -244,8 +244,8 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
 def create_ui():
     init()
 
-    option_state = gr.State("")
-    package_state = gr.State("")
+    # Dùng dict mutable để lưu lựa chọn hiện tại (tránh gr.State cross-tab issue)
+    _sel = {"opt": "", "pkg": ""}
 
     with gr.Blocks(title=config.AppName) as app:
         gr.Markdown(f"# {config.AppName} – Xử lý Word tự động")
@@ -274,6 +274,8 @@ def create_ui():
             open_folder_btn = gr.Button("📂 Mở thư mục output")
 
         def on_submit_load_templates(opt, pkg):
+            _sel["opt"] = opt or ""
+            _sel["pkg"] = pkg or ""
             templates = get_workflow_templates(opt, pkg)
             choices = [t.get("Name", "") for t in templates]
             return gr.update(choices=choices, value=[])
@@ -284,13 +286,18 @@ def create_ui():
             outputs=[template_checkboxes],
         )
 
-        def select_all(choices):
+        def select_all():
+            opt, pkg = _sel["opt"], _sel["pkg"]
+            if not opt or not pkg:
+                return gr.update(value=[])
+            templates = get_workflow_templates(opt, pkg)
+            choices = [t.get("Name", "") for t in templates]
             return gr.update(value=choices)
 
         def deselect_all():
             return gr.update(value=[])
 
-        select_all_btn.click(fn=select_all, inputs=[template_checkboxes], outputs=[template_checkboxes])
+        select_all_btn.click(fn=select_all, outputs=[template_checkboxes])
         deselect_all_btn.click(fn=deselect_all, outputs=[template_checkboxes])
 
         run_event = run_btn.click(

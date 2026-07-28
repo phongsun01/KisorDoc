@@ -25,7 +25,6 @@ Công cụ Python xử lý hàng loạt tài liệu Word (Mail Merge & Copy bả
 ├── 1. Data/            # Chứa các file dữ liệu Excel (.xlsx)
 ├── 2. Templates/       # Chứa các template Word (.docx), chia theo Opt1/Opt2
 ├── 3. Files/           # Thư mục đầu ra (Output)
-└── Config-5.txt        # Cấu hình gốc (đọc từ %LOCALAPPDATA%\UiPathProjectConfigs\)
 ```
 
 ## Hướng dẫn cài đặt và khởi chạy
@@ -34,7 +33,7 @@ Công cụ Python xử lý hàng loạt tài liệu Word (Mail Merge & Copy bả
    ```bash
    pip install -r requirements.txt
    ```
-2. Cấu hình các biến môi trường trong file `.env` tại thư mục gốc để ghi đè `Config-5.txt` nếu cần.
+2. Copy `.env-example` thành `.env` và điền các biến môi trường phù hợp (xem hướng dẫn trong file).
 3. Chạy ứng dụng:
    ```bash
    python main.py

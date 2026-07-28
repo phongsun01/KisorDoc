@@ -1,0 +1,6 @@
+| TT                                                                   | Tên hàng hóa/ Dịch vụ                                                                                | Đơn vị tính | Số lượng | Đơn giá (VNĐ) | Thành tiền (VNĐ) |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ----------- | -------- | ------------- | ---------------- |
+| 1                                                                    | Tủ an toàn sinh học (Tủ thao tác PCR)<br>Model: PCR-3A1<br>Hãng sản xuất: ESCO<br>Xuất xứ: Indonesia | Cái         | 1        |  284.580.000  |  284.580.000     |
+|                                                                      | Tổng cộng                                                                                            |             |          |               |  284.580.000     |
+| Bằng chữ: Hai trăm tám mươi tư triệu năm trăm tám mươi nghìn đồng./. |
+| Giá trên đã bao gồm thuế VAT và các chi phí khác                     |
