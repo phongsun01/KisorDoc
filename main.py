@@ -198,7 +198,11 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
 
         raw_value = selected_pkg.get(col, "")
 
-        if pd.isna(raw_value):
+        try:
+            is_na = pd.isna(raw_value)
+        except (TypeError, ValueError):
+            is_na = False
+        if is_na:
             raw_value = ""
         elif isinstance(raw_value, datetime):
             raw_value = raw_value.strftime("%d/%m/%Y")
