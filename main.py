@@ -137,23 +137,19 @@ def make_nested_dict(flat_dict: dict) -> dict:
 
 
 async def run_batch(option_key: str, package_label: str, selected_templates: list[str],
-                          progress=None):
-    import time, traceback
-    import gradio as gr
-    from file_utils import clear_output_folder, copy_templates_to_output, rename_output, open_output_folder
-    from merger import mail_merge_safe
-    from table_copier import copy_tables_for_file
+                          progress: gr.Progress = gr.Progress()):
+    import time
 
     global config, ds
 
     if not option_key or not option_key.strip():
-        yield [], "⚠️ Vui lòng chọn quy trình"
+        yield "", "⚠️ Vui lòng chọn quy trình"
         return
     if not package_label or not package_label.strip():
-        yield [], "⚠️ Vui lòng chọn gói thầu"
+        yield "", "⚠️ Vui lòng chọn gói thầu"
         return
     if not selected_templates or len(selected_templates) == 0:
-        yield [], "⚠️ Vui lòng chọn ít nhất 1 template"
+        yield "", "⚠️ Vui lòng chọn ít nhất 1 template"
         return
 
     opt = option_key.split(":")[0].strip() if ":" in option_key else option_key
@@ -167,7 +163,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
             break
 
     if not selected_pkg:
-        yield [], "❌ Không tìm thấy gói thầu đã chọn"
+        yield "", "❌ Không tìm thấy gói thầu đã chọn"
         return
 
     goi_thau_id = _str(selected_pkg.get("GoiThau_ID"))
@@ -221,7 +217,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
 
     if progress:
         progress(0, desc="Bắt đầu xử lý...")
-    yield [], "Bắt đầu..."
+    yield "", "Bắt đầu..."
 
     clear_output_folder(config)
 
@@ -258,12 +254,12 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
         except Exception as e:
             results.append(f"❌ {tpl_name}: {e}")
 
-        yield results, f"Đang xử lý {i + 1}/{total}..."
+        yield "\n".join(results), f"Đang xử lý {i + 1}/{total}..."
 
     elapsed = time.time() - start_time
     ok_count = sum(1 for r in results if r.startswith("✅"))
     summary = f"Hoàn thành {ok_count}/{total} file trong {elapsed:.1f}s"
-    yield results, summary
+    yield "\n".join(results), summary
 
 
 def create_ui():
@@ -274,12 +270,13 @@ def create_ui():
     with gr.Blocks(title=config.AppName) as app:
         gr.Markdown(f"# {config.AppName} – Xử lý Word tự động")
 
-        with gr.Tab("1. Chọn & Chạy"):
-            with gr.Row():
-                with gr.Column(scale=1):
-                    gr.Markdown("### Chọn quy trình & Gói thầu")
-                    options = get_options()
-                    option_radio = gr.Radio(choices=options, label="Chọn quy trình")
+        with gr.Tabs() as tabs:
+            with gr.Tab("1. Chọn & Chạy", id=0):
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        gr.Markdown("### Chọn quy trình & Gói thầu")
+                        options = get_options()
+                        option_radio = gr.Radio(choices=options, label="Chọn quy trình")
 
                     goi_thau_rows = ds.query("SELECT * FROM GoiThau ORDER BY CAST(TT AS INTEGER)")
                     packages = []
@@ -291,18 +288,18 @@ def create_ui():
                         gr.Markdown("**Preview thông tin gói thầu:**")
                         pkg_preview = gr.Textbox(label="", interactive=False, max_lines=4)
 
-                with gr.Column(scale=1):
-                    gr.Markdown("### Chọn file template & Chạy")
-                    template_label = gr.Markdown("**Chọn template cần xử lý** (0 file)")
-                    template_checkboxes = gr.CheckboxGroup(label="", choices=[])
+                    with gr.Column(scale=1):
+                        gr.Markdown("### Chọn file template & Chạy")
+                        template_label = gr.Markdown("**Chọn template cần xử lý** (0 file)")
+                        template_checkboxes = gr.CheckboxGroup(label="", choices=[])
 
-                    with gr.Row():
-                        select_all_btn = gr.Button("✓ Chọn tất cả")
-                        deselect_all_btn = gr.Button("✗ Bỏ chọn tất cả")
+                        with gr.Row():
+                            select_all_btn = gr.Button("✓ Chọn tất cả")
+                            deselect_all_btn = gr.Button("✗ Bỏ chọn tất cả")
 
-                    run_btn = gr.Button("🚀 Chạy", variant="primary", size="lg")
+                        run_btn = gr.Button("🚀 Chạy", variant="primary", size="lg")
 
-        with gr.Tab("2. Log & Kết quả"):
+        with gr.Tab("2. Log & Kết quả", id=1):
             gr.Markdown("### Kết quả xử lý")
             result_log = gr.Textbox(
                 label="Chi tiết kết quả",
@@ -411,15 +408,13 @@ def create_ui():
                 gr.update(value=[]),
                 gr.update(value=""),
                 gr.update(visible=False),
-                gr.update(value="")
+                gr.update(value=""),
+                gr.update(selected=0),
             )
 
         rerun_btn.click(
             fn=on_rerun,
-            outputs=[option_radio, package_radio, template_checkboxes, pkg_preview, open_folder_btn, result_log],
-        ).then(
-            fn=None,
-            js="() => { document.querySelector('#tab1').click(); }",
+            outputs=[option_radio, package_radio, template_checkboxes, pkg_preview, open_folder_btn, result_log, tabs],
         )
 
     return app
