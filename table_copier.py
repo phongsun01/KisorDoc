@@ -16,7 +16,7 @@ from lxml import etree
 from config import AppConfig
 
 # FIX 1: Bỏ hardcode — placeholder pattern động, nhận bất kỳ tên nào trong {{...}}
-TABLE_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
+TABLE_PLACEHOLDER_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")
 
 EXCEL_BORDER_MAP = {
     "thin": "single", "medium": "single", "thick": "single",
