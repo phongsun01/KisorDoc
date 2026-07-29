@@ -199,12 +199,6 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
 
     nested_context = make_nested_dict(context)
 
-    if tables_rows:
-        for table_row in tables_rows:
-            placeholder_name = _str(table_row.get("Name", ""))
-            if placeholder_name:
-                nested_context[placeholder_name] = ""
-
     xlsx_files = sorted(config.data_path.glob("*.xlsx"))
     danh_muc_file = next(
         (f for f in xlsx_files if "DanhMuc" in f.stem or "danh muc" in f.stem.lower()),
@@ -235,15 +229,15 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
         if progress:
             progress((i + 1) / total, desc=f"Đang xử lý: {tpl_name}")
         try:
+            ok, err = mail_merge_safe(src_path, nested_context, src_path)
+            if not ok:
+                raise RuntimeError(err)
+
             if danh_muc_file and danh_muc_file.exists():
                 try:
                     copy_tables_for_file(src_path, config, goi_thau_id, tables_rows, danh_muc_file)
                 except Exception as table_err:
                     print(f"⚠️  Lỗi copy bảng: {table_err}")
-
-            ok, err = mail_merge_safe(src_path, nested_context, src_path)
-            if not ok:
-                raise RuntimeError(err)
 
             new_path = rename_output(src_path, goi_thau_id, used_names)
             results.append(f"✅ {tpl_name} → {new_path.name}")
