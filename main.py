@@ -17,10 +17,11 @@ import gradio as gr
 
 from config import load_config, AppConfig
 from dataset import DataSet
-from file_utils import clear_output_folder, copy_templates_to_output, rename_output, open_output_folder
+from file_utils import clear_output_folder, copy_templates_to_output, rename_output, open_output_folder, cleanup_old_logs, open_logs_folder
 from merger import mail_merge_safe
 from table_copier import copy_tables_for_file
 import shutil
+from docxtpl import DocxTemplate
 
 config: AppConfig | None = None
 ds: DataSet | None = None
@@ -39,6 +40,7 @@ def init():
     global config, ds
     config = load_config()
     ds = DataSet(config)
+    cleanup_old_logs(config)
 
 
 def get_options() -> list[str]:
@@ -138,6 +140,133 @@ def make_nested_dict(flat_dict: dict) -> dict:
     return nested
 
 
+def run_preview(option_key: str, package_label: str, 
+                selected_templates: list[str]) -> str:
+    """
+    Simplified dry-run: kiểm tra context + tables mà không tạo file.
+    Trả về string hiển thị trong preview_box.
+    """
+    if not option_key or not package_label or not selected_templates:
+        return "⚠️ Chọn đủ quy trình, gói thầu và ít nhất 1 template trước"
+
+    opt = option_key.split(":")[0].strip() if ":" in option_key else option_key
+
+    # --- Build context (copy từ run_batch) ---
+    goi_thau_rows = ds.query("SELECT * FROM GoiThau")
+    selected_pkg = next((
+        r for r in goi_thau_rows
+        if f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}" == package_label
+    ), None)
+    if not selected_pkg:
+        return "❌ Không tìm thấy gói thầu"
+
+    config_rows = ds.query("SELECT * FROM Config")
+    context_keys: set[str] = set()
+    missing_keys: list[str] = []
+
+    for r in config_rows:
+        key = _str(r.get("Key"))
+        col = _str(r.get("Value"))
+        if not key or not col:
+            continue
+        clean_key = key.strip("<>{}| ")
+        for suffix in (".Date.Long", ".Date", ".Upper", ".Number"):
+            if clean_key.endswith(suffix):
+                clean_key = clean_key[:-len(suffix)]
+                break
+        if "|" in clean_key:
+            clean_key = clean_key.split("|")[0].strip()
+
+        raw_value = selected_pkg.get(col)
+        try:
+            is_na = pd.isna(raw_value)
+        except (TypeError, ValueError):
+            is_na = False
+
+        context_keys.add(clean_key)
+        if is_na or raw_value is None or str(raw_value).strip() == "":
+            missing_keys.append(clean_key)
+
+    lines = []
+
+    # Dòng 1: context summary
+    if missing_keys:
+        lines.append(
+            f"✅ Context: {len(context_keys)} key  |  "
+            f"⚠️ Thiếu data: {', '.join(missing_keys)}"
+        )
+    else:
+        lines.append(f"✅ Context: {len(context_keys)} key – đầy đủ")
+
+    # --- Kiểm tra Tables ---
+    try:
+        tables_rows = ds.query("SELECT * FROM Tables")
+    except Exception:
+        tables_rows = []
+
+    goi_thau_id = _str(selected_pkg.get("GoiThau_ID"))
+
+    # Tìm các dòng Tables liên quan đến template đang chọn
+    xlsx_files = sorted(config.data_path.glob("*.xlsx"))
+    danh_muc_file = next(
+        (f for f in xlsx_files if "DanhMuc" in f.stem or "danh muc" in f.stem.lower()),
+        xlsx_files[0] if xlsx_files else None
+    )
+
+    wb = None
+    if danh_muc_file and danh_muc_file.exists():
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(danh_muc_file, read_only=True, data_only=True)
+        except Exception:
+            wb = None
+
+    table_lines = []
+    for t in tables_rows:
+        if _str(t.get("GoiThau_ID")) != goi_thau_id:
+            continue
+        name     = _str(t.get("Name", ""))
+        sheet    = _str(t.get("Sheet", ""))
+        range_   = _str(t.get("Range", ""))
+        hide     = _str(t.get("Hide", ""))
+
+        # Đếm số dòng thực tế trong sheet nếu có file
+        row_count = "?"
+        if wb and sheet and sheet in wb.sheetnames:
+            try:
+                ws = wb[sheet]
+                # Tính max_row trong range
+                if ":" in range_:
+                    parts = range_.split(":")
+                    end = parts[1]
+                    digits = "".join(c for c in end if c.isdigit())
+                    row_count = digits if digits else str(ws.max_row)
+                else:
+                    row_count = str(ws.max_row)
+            except Exception:
+                pass
+
+        hide_str = f"  |  ẩn: {hide}" if hide else ""
+        table_lines.append(
+            f"📋 {name} → {sheet}  {range_}  {row_count} dòng{hide_str}"
+        )
+
+    if wb:
+        try:
+            wb.close()
+        except Exception:
+            pass
+
+    if table_lines:
+        lines.extend(table_lines)
+    elif tables_rows:
+        lines.append("📋 Tables: không có dòng nào khớp với gói thầu này")
+    else:
+        lines.append("📋 Tables: (không có sheet Tables)")
+
+    return "\n".join(lines)
+
+
 def write_with_retry(func, max_retries=3, delay=2.0, yield_fn=None):
     for attempt in range(1, max_retries + 1):
         try:
@@ -154,9 +283,63 @@ def write_with_retry(func, max_retries=3, delay=2.0, yield_fn=None):
                 raise
 
 
+class IncrementalRunLogger:
+    def __init__(self, config, goi_thau_id, option, mode="run"):
+        self.config = config
+        self.goi_thau_id = goi_thau_id
+        self.option = option
+        self.mode = mode
+        
+        self.log_dir = Path(config.ProjectPath) / "logs"
+        self.log_dir.mkdir(exist_ok=True)
+        
+        ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        suffix = f"_{mode}" if mode != "run" else ""
+        self.filepath = self.log_dir / f"{ts}_{goi_thau_id}_{option}{suffix}.log"
+        self.start_time = time.time()
+        self.ok_count = 0
+        self.error_count = 0
+        self.warning_count = 0
+
+    def write_header(self, option_desc, package_desc, total_files):
+        time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        mode_str = "Chạy thật" if self.mode == "run" else ("Retry" if self.mode == "retry" else "Dry-run")
+        header = f"""=====================================
+KisorDoc – Run Log
+=====================================
+Thời gian     : {time_str}
+Option        : {option_desc}
+Gói thầu      : {package_desc}
+Chế độ        : {mode_str}
+Tổng file     : {total_files}
+=====================================
+
+"""
+        with open(self.filepath, "w", encoding="utf-8-sig") as f:
+            f.write(header)
+
+    def log_event(self, emoji, name, extra_info=None):
+        time_str = datetime.now().strftime("%H:%M:%S")
+        line = f"[{time_str}] {emoji} {name}\n"
+        if extra_info:
+            line += f"           {extra_info}\n"
+        with open(self.filepath, "a", encoding="utf-8-sig") as f:
+            f.write(line)
+
+    def write_footer(self):
+        elapsed = time.time() - self.start_time
+        footer = f"""
+=====================================
+Kết quả: {self.ok_count} thành công / {self.error_count} lỗi / {self.warning_count} warning
+Thời gian chạy: {elapsed:.1f} giây
+=====================================
+"""
+        with open(self.filepath, "a", encoding="utf-8-sig") as f:
+            f.write(footer)
+
+
 async def run_batch(option_key: str, package_label: str, selected_templates: list[str],
                           progress: gr.Progress = gr.Progress(), retry_state: dict | None = None):
-    import time
 
     global config, ds
 
@@ -237,6 +420,9 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
         progress(0, desc="Bắt đầu xử lý...")
     yield "", "Bắt đầu...", None
 
+    mode = "retry" if retry_state else "run"
+    logger = IncrementalRunLogger(config, goi_thau_id, opt, mode)
+
     # F3+F6: Nếu là retry, chỉ xử lý các template bị lỗi; nếu không thì xóa folder và chạy lại
     if retry_state:
         # Retry: chỉ copy và xử lý các template bị lỗi
@@ -285,17 +471,37 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
         copied = copy_templates_to_output(config, opt, template_filenames)
 
     total = len(copied)
+    logger.write_header(option_key, package_label, total)
+
     results = []
     used_names: set[str] = set()
-    start_time = time.time()
     has_locked = False
     has_other_error = False
     failed_templates: list[str] = []
+
+    # Lấy danh sách table placeholder names từ tables_rows
+    table_placeholder_names = {
+        _str(t.get("Name", "")).strip("{} ")
+        for t in tables_rows
+        if _str(t.get("GoiThau_ID")) == goi_thau_id
+    }
 
     for i, (src_path, tpl_name) in enumerate(zip(copied, template_names)):
         if progress:
             progress((i + 1) / total, desc=f"Đang xử lý: {tpl_name}")
         try:
+            # Check for missing placeholders
+            missing_placeholders = []
+            try:
+                doc = DocxTemplate(str(src_path))
+                undeclared = doc.get_undeclared_template_variables()
+                for var in undeclared:
+                    var_clean = var.strip()
+                    if var_clean not in nested_context and var_clean not in table_placeholder_names:
+                        missing_placeholders.append(var_clean)
+            except Exception as e:
+                print(f"⚠️  Lỗi quét placeholder cho {tpl_name}: {e}")
+
             def do_merge(s=src_path):
                 return mail_merge_safe(s, nested_context, s)
 
@@ -318,28 +524,47 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
                     print(f"⚠️  Lỗi copy bảng: {table_err}")
 
             new_path = rename_output(src_path, goi_thau_id, used_names)
-            results.append(f"✅ {tpl_name} → {new_path.name}")
+
+            if missing_placeholders:
+                warn_msg = f"Warning: Placeholder {', '.join('{{' + k + '}}' for k in missing_placeholders)} không có data"
+                results.append(f"⚠️ {tpl_name} → {new_path.name}\n   → {warn_msg}")
+                logger.warning_count += 1
+                logger.log_event("⚠️", f"{tpl_name} → {new_path.name}", warn_msg)
+            else:
+                results.append(f"✅ {tpl_name} → {new_path.name}")
+                logger.ok_count += 1
+                logger.log_event("✅", f"{tpl_name} → {new_path.name}")
 
         except PermissionError as e:
             if "being used by another process" in str(e) or getattr(e, 'errno', None) == errno.EACCES:
                 has_locked = True
                 failed_templates.append(tpl_name)
-                results.append(f"🔒 {tpl_name}: Không thể ghi file vì đang được mở trong Word.\n   → Vui lòng đóng file này và nhấn \"🔄 Chạy lại file lỗi\"")
+                err_msg = "Không thể ghi file vì đang được mở trong Word.\n   → Vui lòng đóng file này và nhấn \"🔄 Chạy lại file lỗi\""
+                results.append(f"🔒 {tpl_name}: {err_msg}")
+                logger.error_count += 1
+                logger.log_event("🔒", tpl_name, f"Lỗi: PermissionError – {err_msg}")
             else:
                 has_other_error = True
                 failed_templates.append(tpl_name)
-                results.append(f"❌ {tpl_name}: Lỗi quyền truy cập – {e}")
+                err_msg = f"Lỗi quyền truy cập – {e}"
+                results.append(f"❌ {tpl_name}: {err_msg}")
+                logger.error_count += 1
+                logger.log_event("❌", tpl_name, f"Lỗi: {err_msg}")
 
         except Exception as e:
             has_other_error = True
             failed_templates.append(tpl_name)
-            results.append(f"❌ {tpl_name}: {e}")
+            err_msg = str(e)
+            results.append(f"❌ {tpl_name}: {err_msg}")
+            logger.error_count += 1
+            logger.log_event("❌", tpl_name, f"Lỗi: {err_msg}")
 
         yield "\n".join(results), f"Đang xử lý {i + 1}/{total}...", None
 
-    elapsed = time.time() - start_time
-    ok_count = sum(1 for r in results if r.startswith("✅"))
-    summary = f"Hoàn thành {ok_count}/{total} file trong {elapsed:.1f}s"
+    elapsed = time.time() - logger.start_time
+    summary = f"✅ {logger.ok_count}  ⚠️ {logger.warning_count}  ❌ {logger.error_count}  /  {total} file  ({elapsed:.1f}s)"
+    
+    logger.write_footer()
 
     retry_state_data = None
     if failed_templates:
@@ -391,6 +616,14 @@ def create_ui():
                             deselect_all_btn = gr.Button("✗ Bỏ chọn tất cả")
 
                         run_btn = gr.Button("🚀 Chạy", variant="primary", size="lg")
+                        check_btn = gr.Button("🔍 Kiểm tra", variant="secondary")
+                        preview_box = gr.Textbox(
+                            label="Kết quả kiểm tra",
+                            interactive=False,
+                            lines=4,
+                            max_lines=8,
+                            visible=False,
+                        )
 
             with gr.Tab("2. Log & Kết quả", id=1):
                 gr.Markdown("### Kết quả xử lý")
@@ -404,6 +637,7 @@ def create_ui():
 
                 with gr.Row():
                     open_folder_btn = gr.Button("📂 Mở thư mục output", visible=False)
+                    open_logs_btn = gr.Button("📋 Mở thư mục log", visible=True)
                     rerun_btn = gr.Button("← Chạy lại", variant="secondary")
                     retry_btn = gr.Button("🔄 Chạy lại file lỗi", variant="stop", visible=False)
 
@@ -417,19 +651,19 @@ def create_ui():
 
             opt = _sel["opt"]
             if not opt or not pkg:
-                return preview_text, gr.update(choices=[], value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)"), None, gr.update(visible=False)
+                return preview_text, gr.update(choices=[], value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)"), None, gr.update(visible=False), gr.update(visible=False)
 
             templates = get_workflow_templates(opt, pkg)
             choices = [t.get("Name", "") for t in templates]
             label_text = f"**Chọn template cần xử lý** ({len(choices)} file)"
             _sel["pkg"] = pkg
 
-            return preview_text, gr.update(choices=choices, value=[]), gr.update(value=label_text), None, gr.update(visible=False)
+            return preview_text, gr.update(choices=choices, value=[]), gr.update(value=label_text), None, gr.update(visible=False), gr.update(visible=False)
 
         package_radio.change(
             fn=on_package_change,
             inputs=[package_radio],
-            outputs=[pkg_preview, template_checkboxes, template_label, last_run_state, retry_btn]
+            outputs=[pkg_preview, template_checkboxes, template_label, last_run_state, retry_btn, preview_box]
         )
 
         def on_option_change(opt):
@@ -441,12 +675,13 @@ def create_ui():
                 "",
                 None,
                 gr.update(visible=False),
+                gr.update(visible=False),
             )
 
         option_radio.change(
             fn=on_option_change,
             inputs=[option_radio],
-            outputs=[package_radio, template_checkboxes, template_label, pkg_preview, last_run_state, retry_btn]
+            outputs=[package_radio, template_checkboxes, template_label, pkg_preview, last_run_state, retry_btn, preview_box]
         )
 
         def update_checkbox_label(selected):
@@ -469,6 +704,16 @@ def create_ui():
 
         select_all_btn.click(fn=select_all, outputs=[template_checkboxes])
         deselect_all_btn.click(fn=deselect_all, outputs=[template_checkboxes])
+
+        def on_check(opt, pkg, selected):
+            result = run_preview(opt, pkg, selected)
+            return gr.update(value=result, visible=True)
+
+        check_btn.click(
+            fn=on_check,
+            inputs=[option_radio, package_radio, template_checkboxes],
+            outputs=[preview_box],
+        )
 
         def get_retry_label(retry_state):
             if not retry_state or not retry_state.get("failed_templates"):
@@ -513,6 +758,15 @@ def create_ui():
                 return f"❌ Lỗi mở thư mục: {e}"
 
         open_folder_btn.click(fn=on_open_folder, outputs=[status_text])
+
+        def on_open_logs():
+            try:
+                open_logs_folder(config)
+                return "✅ Thư mục log đã mở"
+            except Exception as e:
+                return f"❌ Lỗi mở thư mục log: {e}"
+
+        open_logs_btn.click(fn=on_open_logs, outputs=[status_text])
 
         def on_retry_click(retry_state):
             if not retry_state or not retry_state.get("failed_templates"):

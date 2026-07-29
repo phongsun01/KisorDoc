@@ -114,3 +114,61 @@ def open_output_folder(config: AppConfig):
             print(f"Output folder does not exist: {path}")
     except Exception as e:
         print(f"Error opening output folder: {e}")
+
+
+def cleanup_old_logs(config: AppConfig):
+    try:
+        log_dir = Path(config.ProjectPath) / "logs"
+        if not log_dir.exists():
+            log_dir.mkdir(parents=True, exist_ok=True)
+            return
+
+        now = time.time()
+        thirty_days_seconds = 30 * 24 * 60 * 60
+        cutoff = now - thirty_days_seconds
+
+        # Get all log files sorted by modification time (oldest first)
+        log_files = sorted(
+            [f for f in log_dir.glob("*.log") if f.is_file()],
+            key=lambda f: f.stat().st_mtime
+        )
+
+        # 1. Clean up files older than 30 days
+        retaining_files = []
+        for f in log_files:
+            mtime = f.stat().st_mtime
+            if mtime < cutoff:
+                try:
+                    f.unlink()
+                except Exception as ex:
+                    print(f"⚠️ Không thể xóa file log cũ {f.name}: {ex}")
+            else:
+                retaining_files.append(f)
+
+        # 2. Keep maximum 100 files, delete oldest if exceeding
+        max_files = 100
+        if len(retaining_files) > max_files:
+            to_delete_count = len(retaining_files) - max_files
+            for i in range(to_delete_count):
+                f = retaining_files[i]
+                try:
+                    f.unlink()
+                except Exception as ex:
+                    print(f"⚠️ Không thể xóa file log vượt hạn mức {f.name}: {ex}")
+    except Exception as e:
+        print(f"⚠️ Lỗi dọn dẹp log: {e}")
+
+
+def open_logs_folder(config: AppConfig):
+    try:
+        log_dir = Path(config.ProjectPath) / "logs"
+        if not log_dir.exists():
+            log_dir.mkdir(parents=True, exist_ok=True)
+        path = str(log_dir.resolve())
+        if os.path.exists(path):
+            os.system(f'start "" "{path}"')
+        else:
+            print(f"Logs folder does not exist: {path}")
+    except Exception as e:
+        print(f"Error opening logs folder: {e}")
+

@@ -225,21 +225,21 @@ Phase 7 (đóng gói + test)     ⬜ Cần test thực tế
 
 ## Phase 8 – Tính năng bổ sung (Enhancements F1-F6)
 
-- [ ] **F1 – Validation trước khi chạy**:
-  - [ ] Thêm validation đồng bộ các bước Option, Gói thầu, Template trước khi chạy.
-  - [ ] Hiển thị thông báo rõ ràng prefix `⚠️` trong `status_text` thay vì popup.
-- [ ] **F2 – Dry-run / Preview mode**:
-  - [ ] Thêm nút "🔍 Kiểm tra" trong Tab Chọn & Chạy.
-  - [ ] Scan các variable và so khớp context mà không ghi đè file thật.
-  - [ ] Hiển thị kết quả dry-run chi tiết theo dạng bảng (Có data / Thiếu data / Table OK).
+- [x] **F1 – Validation trước khi chạy**:
+  - [x] Thêm validation đồng bộ các bước Option, Gói thầu, Template trước khi chạy.
+  - [x] Hiển thị thông báo rõ ràng prefix `⚠️` trong `status_text` thay vì popup.
+- [x] **F2 – Dry-run / Preview mode** (ver1.12):
+  - [x] Thêm nút "🔍 Kiểm tra" trong Tab Chọn & Chạy.
+  - [x] Scan các variable và so khớp context mà không ghi đè file thật.
+  - [x] Hiển thị kết quả dry-run chi tiết theo dạng bảng (Có data / Thiếu data / Table OK).
 - [x] **F3 – Retry cho file lỗi** (ver1.10):
   - [x] Hiển thị nút "🔄 Chạy lại file lỗi" nếu kết quả chạy có file ❌.
   - [x] Chỉ xử lý lại các file bị lỗi, không xóa/overwrite các file đã xử lý thành công.
-- [ ] **F4 – Export log ra file**:
-  - [ ] Tạo thư mục `logs/` trong project path.
-  - [ ] Ghi log incremental, đặt tên file log theo pattern thời gian, gói thầu và option.
-  - [ ] Thêm nút "📋 Mở thư mục log" trên UI.
-  - [ ] Tự động dọn dẹp các log cũ hơn 30 ngày.
+- [x] **F4 – Export log ra file** (ver1.11):
+  - [x] Tạo thư mục `logs/` trong project path.
+  - [x] Ghi log incremental, đặt tên file log theo pattern thời gian, gói thầu và option.
+  - [x] Thêm nút "📋 Mở thư mục log" trên UI.
+  - [x] Tự động dọn dẹp các log cũ hơn 30 ngày.
 - [ ] **F5 – Version pin cho Config/Tables**:
   - [ ] Ghi snapshot cấu hình Config và Tables vào cuối file log.
   - [ ] So sánh cấu hình hiện tại với lần chạy trước của cùng gói thầu và hiển thị banner cảnh báo nếu có diff.
