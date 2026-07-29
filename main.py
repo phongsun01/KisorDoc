@@ -416,6 +416,9 @@ def create_ui():
         rerun_btn.click(
             fn=on_rerun,
             outputs=[option_radio, package_radio, template_checkboxes, pkg_preview, open_folder_btn, result_log],
+        ).then(
+            fn=None,
+            js="() => { document.querySelector('#tab1').click(); }",
         )
 
     return app
