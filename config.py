@@ -17,6 +17,7 @@ class AppConfig(BaseModel):
     AgentPath: str = ""
     ExceptionSheet: str = "S."
     AppName: str = "KisorDoc-AI"
+    ExcelToWordWidthFactor: int = 90
 
     @property
     def data_path(self) -> Path:
@@ -46,13 +47,20 @@ def load_config() -> AppConfig:
         "AGENT_PATH": "AgentPath",
         "EXCEPTION_SHEET": "ExceptionSheet",
         "APP_NAME": "AppName",
+        "EXCEL_TO_WORD_WIDTH_FACTOR": "ExcelToWordWidthFactor",
     }
 
     data = {}
     for env_key, config_key in env_mapping.items():
         val = os.environ.get(env_key)
         if val is not None:
-            data[config_key] = val
+            if config_key == "ExcelToWordWidthFactor":
+                try:
+                    data[config_key] = int(val)
+                except ValueError:
+                    data[config_key] = 90
+            else:
+                data[config_key] = val
 
     if "ProjectPath" not in data:
         raise ValueError("PROJECT_PATH is required in .env file")

@@ -1,14 +1,19 @@
-# Changelog - KisorDoc-AI
+﻿# Changelog
 
-## v1.1.0 (2026-07-28)
+## [1.9.0] - 2026-07-29
 
-- **Di chuyển cú pháp Placeholder:** Chuyển đổi toàn bộ template Word sang định dạng ngoặc nhọn kép `{{ }}` tương thích với Jinja2 và thư viện `docxtpl`.
-- **Phân tách các biến trùng lặp (Date):** Tách riêng các biến định dạng ngày (ví dụ `<<KHLCNT_TTr.Date>>` -> `{{KHLCNT_TTr_Date|date}}`) và các biến văn bản (ví dụ `<<KHLCNT_TTr>>` -> `{{KHLCNT_TTr}}`) để tránh xung đột ghi đè dữ liệu.
-- **Chuẩn hóa biến Bảng:** Chuyển đổi toàn bộ `{DanhMuc}` và `{DanhMucKoGia}` trong Word sang `{{DanhMuc}}` và `{{DanhMucKoGia}}`.
-- **Sửa lỗi biến chứa dấu chấm:** Tự động tổ chức lại từ điển dữ liệu phẳng (flat dictionary) từ Excel thành cấu trúc lồng nhau (nested dictionary) để Jinja2 hiển thị đúng các biến như `{{KHLCNT_TTr.Dvi}}` và `{{DuToan.NguoiLap}}` mà không bị báo lỗi `UndefinedError`.
-- **Cải tiến cấu hình (.env):** Cho phép file `.env` ghi đè toàn bộ các trường cấu hình trong file `Config-5.txt`.
-- **Cải tiến tính năng Mở thư mục Output:** Giải quyết tuyệt đối đường dẫn tuyệt vời trên hệ điều hành Windows, bổ sung kiểm tra tồn tại và bắt lỗi ngoại lệ khi mở thư mục.
+### Added
+- Cấu hình hệ số chuyển đổi độ rộng cột từ Excel sang Word bằng biến môi trường EXCEL_TO_WORD_WIDTH_FACTOR (mặc định = 90) trong file .env và AppConfig.
+- Tích hợp 6 đề xuất tính năng nâng cao (F1 - F6) vào tài liệu PRD chính thức [PRD-WordBatchProcessor.md](docs/PRD-WordBatchProcessor.md).
+- Thêm **Phase 8** và mục **Các lỗi cần sửa sau** vào tài liệu [CHECKLIST-KisorDoc-AI.md](docs/CHECKLIST-KisorDoc-AI.md).
 
-## v1.0.0 (2026-07-27)
+### Changed
+- Cập nhật hàm un_batch trong main.py để định dạng log kết quả xuống dòng (join bằng \n) giúp hiển thị rõ ràng trên giao diện Gradio Textbox thay vì hiển thị dạng danh sách thô.
+- Hợp nhất tài liệu PRD bằng cách gộp file PRD-Enhancements.md vào PRD-WordBatchProcessor.md và xóa file PRD-Enhancements.md cũ.
 
-- Phiên bản đầu tiên chuyển đổi từ bot UiPath sang mã nguồn Python.
+### Fixed
+- Sửa lỗi lệch thẻ XML (Opening and ending tag mismatch: body line 2 and tc) gây hỏng file Word bằng cách cập nhật regex di chuyển template an toàn hơn, không quét xuyên qua các tag cấu trúc XML quan trọng (p, 	c, 	r, 	bl).
+- Khôi phục và di chuyển thành công toàn bộ 36 file template gốc sang cấu trúc template {{}} mới an toàn.
+- Sửa lỗi tìm kiếm sheet Excel khi tên sheet chứa khoảng trắng ngoài mong muốn (ví dụ: ' S.DoDa' thay vì 'S.DoDa') bằng cách so khớp strip whitespace.
+- Sửa lỗi crash khi định dạng ngày do dữ liệu chứa giá trị NaT (Not a Time) trong Pandas.
+- Cải thiện nút mở thư mục output sử dụng subprocess.Popen đáng tin cậy hơn trên Windows từ Gradio background thread.

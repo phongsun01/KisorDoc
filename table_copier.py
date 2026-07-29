@@ -90,7 +90,7 @@ def copy_tables_for_file(
             if ws_data is None:
                 continue
 
-            _insert_table_at_paragraph(doc, para_element, ws_data)
+            _insert_table_at_paragraph(doc, para_element, ws_data, config)
 
     doc.save(str(doc_path))
 
@@ -160,10 +160,17 @@ def _collect_table_placeholders(doc: Document, valid_keys: set) -> dict[str, lis
 def _read_excel_range(xlsx_path: Path, sheet_name: str, range_spec: str, hide_cols: str):
     try:
         wb = openpyxl.load_workbook(xlsx_path, read_only=False, data_only=True)
-        if sheet_name not in wb.sheetnames:
+        # FIX: So sanh ten sheet sau khi strip whitespace (vi du: ' S.DoDa' != 'S.DoDa')
+        sheet_name_clean = sheet_name.strip()
+        actual_sheet = None
+        for s in wb.sheetnames:
+            if s.strip() == sheet_name_clean:
+                actual_sheet = s
+                break
+        if actual_sheet is None:
             wb.close()
             return None
-        ws = wb[sheet_name]
+        ws = wb[actual_sheet]
 
         parsed = _parse_range(range_spec, ws)
         if parsed is None:
@@ -304,7 +311,7 @@ def _build_merged_map(ws, min_row, max_row, min_col, max_col) -> dict:
     return merged_map
 
 
-def _insert_table_at_paragraph(doc: Document, para_element, ws_data):
+def _insert_table_at_paragraph(doc: Document, para_element, ws_data, config: AppConfig):
     rows_data = ws_data["rows"]
     if not rows_data:
         return
@@ -318,7 +325,7 @@ def _insert_table_at_paragraph(doc: Document, para_element, ws_data):
     col_widths = ws_data.get("col_widths", {})
 
     try:
-        tbl = _create_word_table_xml(nrows, ncols, rows_data, merged, row_heights, col_widths)
+        tbl = _create_word_table_xml(nrows, ncols, rows_data, merged, row_heights, col_widths, config.ExcelToWordWidthFactor)
         parent = para_element.getparent()
         if parent is not None:
             idx = list(parent).index(para_element)
@@ -329,36 +336,26 @@ def _insert_table_at_paragraph(doc: Document, para_element, ws_data):
         # Keep the placeholder if table creation fails, don't delete it
 
 
-def _create_word_table_xml(nrows, ncols, rows_data, merged, row_heights, col_widths):
+def _create_word_table_xml(nrows, ncols, rows_data, merged, row_heights, col_widths, factor: int = 90):
     NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
     table_xml = etree.Element(f"{{{NS}}}tbl")
 
     tblPr = etree.SubElement(table_xml, f"{{{NS}}}tblPr")
     tblStyle = etree.SubElement(tblPr, f"{{{NS}}}tblStyle")
     tblStyle.set(f"{{{NS}}}val", "TableGrid")
+    # Tính grid widths trước để biết tổng
+    grid_twips = [_col_twips(col_widths, ci, factor=factor) for ci in range(ncols)]
+    total_twips = sum(grid_twips)
+
     tblW = etree.SubElement(tblPr, f"{{{NS}}}tblW")
-    tblW.set(f"{{{NS}}}w", "5000")
-    tblW.set(f"{{{NS}}}type", "pct")
+    tblW.set(f"{{{NS}}}w", str(total_twips))
+    tblW.set(f"{{{NS}}}type", "dxa")
 
     tblGrid = etree.SubElement(table_xml, f"{{{NS}}}tblGrid")
-    
-    # FIX: Excel column width to Word twips conversion
-    # After testing: Excel width * 143 gives closest match
-    # Excel default width unit is based on "0" character width in Calibri 11pt
-    # 1 Excel width unit ≈ 7 pixels at 96 DPI ≈ 143 twips
-    
+
     for ci in range(ncols):
         gridCol = etree.SubElement(tblGrid, f"{{{NS}}}gridCol")
-        cw = col_widths.get(ci)
-        
-        if cw and cw > 0:
-            # Direct conversion: Excel width * 143 = Word twips
-            twips = max(200, int(cw * 143))
-        else:
-            # Default 1 inch if no width specified
-            twips = 1440
-            
-        gridCol.set(f"{{{NS}}}w", str(twips))
+        gridCol.set(f"{{{NS}}}w", str(grid_twips[ci]))
 
     # FIX 2: Build master cell lookup để biết đâu là master, đâu là phụ
     # merged[(ri, ci)] = (master_ri, master_ci, row_span, col_span)
@@ -405,24 +402,43 @@ def _create_word_table_xml(nrows, ncols, rows_data, merged, row_heights, col_wid
                 else None
             )
 
+            # Tính cell width theo col_widths thực tế
+            if is_master and merge_info:
+                _, _, _, cs = merge_info
+                cell_w_twips = sum(
+                    _col_twips(col_widths, c, factor=factor)
+                    for c in range(ci, ci + cs)
+                )
+            else:
+                cell_w_twips = _col_twips(col_widths, ci, factor=factor)
+
             if slave_type == "v":
                 # FIX 2: Ô phụ merge dọc → tạo ô với vMerge=continue (KHÔNG skip)
-                tc = _create_vmerge_continue_cell(NS)
+                tc = _create_vmerge_continue_cell(NS, cell_w_twips)
                 tr.append(tc)
             else:
                 # Master cell hoặc ô bình thường
-                tc = _create_cell_xml(NS, cell_data, merge_info if is_master else None)
+                tc = _create_cell_xml(NS, cell_data, merge_info if is_master else None, cell_w_twips)
                 tr.append(tc)
 
     return table_xml
 
 
-def _create_vmerge_continue_cell(NS: str):
+def _col_twips(col_widths: dict, ci: int, default: int = 1440, factor: int = 90) -> int:
+    """Chuyen doi Excel column width -> Word twips.
+    Dùng tham số factor cấu hình từ config."""
+    cw = col_widths.get(ci)
+    if cw and cw > 0:
+        return max(200, int(cw * factor))
+    return default
+
+
+def _create_vmerge_continue_cell(NS: str, cell_w_twips: int = 1440):
     """FIX 2: Tạo ô phụ merge dọc với vMerge=continue"""
     tc = etree.Element(f"{{{NS}}}tc")
     tcPr = etree.SubElement(tc, f"{{{NS}}}tcPr")
     tcW = etree.SubElement(tcPr, f"{{{NS}}}tcW")
-    tcW.set(f"{{{NS}}}w", "1440")
+    tcW.set(f"{{{NS}}}w", str(cell_w_twips))
     tcW.set(f"{{{NS}}}type", "dxa")
     vMerge = etree.SubElement(tcPr, f"{{{NS}}}vMerge")
     vMerge.set(f"{{{NS}}}val", "continue")
@@ -431,11 +447,11 @@ def _create_vmerge_continue_cell(NS: str):
     return tc
 
 
-def _create_cell_xml(NS: str, cell_data, merge_info):
+def _create_cell_xml(NS: str, cell_data, merge_info, cell_w_twips: int = 1440):
     tc = etree.Element(f"{{{NS}}}tc")
     tcPr = etree.SubElement(tc, f"{{{NS}}}tcPr")
     tcW = etree.SubElement(tcPr, f"{{{NS}}}tcW")
-    tcW.set(f"{{{NS}}}w", "1440")
+    tcW.set(f"{{{NS}}}w", str(cell_w_twips))
     tcW.set(f"{{{NS}}}type", "dxa")
 
     if merge_info:

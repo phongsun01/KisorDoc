@@ -4,7 +4,7 @@ import re
 import shutil
 
 TEMPLATES_DIR = r"D:\Antigravity\1. Thanh toan nho\2. Templates"
-PATTERN_LT_GT = re.compile(r"&lt;&lt;((?:(?!&gt;&gt;).)*)&gt;&gt;", re.DOTALL)
+PATTERN_LT_GT = re.compile(r"&lt;&lt;((?:(?!&gt;&gt;)(?!</?w:(?:p|tc|tr|tbl)\b).)*)&gt;&gt;", re.DOTALL)
 PATTERN_TABLE = re.compile(r"(?<!\{)\{((?:(?!\}).)*?)(DanhMucKoGia|DanhMuc)((?:(?!\}).)*?)\}(?!\})", re.DOTALL)
 
 def clean_placeholder_text(xml_segment):

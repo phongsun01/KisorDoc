@@ -569,3 +569,399 @@ Dự án này là phiên bản Python của bot UiPath "KisorDoc-AI" (Word13.12_
 | `PublicBidding.xaml` – Đăng tải web | **BỎ** (không dùng nữa) | |
 
 **PRD hoàn chỉnh — sẵn sàng code.**
+
+---
+
+## 14. PRD – KisorDoc Enhancements (Bổ sung nâng cao)
+
+### Tổng quan
+
+6 tính năng bổ sung nâng cao trải nghiệm sử dụng KisorDoc sau khi core pipeline ổn định. Các tính năng được thiết kế độc lập — có thể implement theo bất kỳ thứ tự nào mà không ảnh hưởng nhau.
+
+| # | Tính năng | Ưu tiên | Độ phức tạp |
+|---|---|---|---|
+| F1 | Validation trước khi chạy | 🔴 Cao | Thấp |
+| F2 | Dry-run / Preview mode | 🔴 Cao | Trung bình |
+| F3 | Retry cho file lỗi | 🟡 Trung bình | Thấp |
+| F4 | Export log ra file | 🟡 Trung bình | Thấp |
+| F5 | Version pin Config/Tables | 🟢 Thấp | Trung bình |
+| F6 | Xử lý file đang mở (locked) | 🔴 Cao | Thấp |
+
+---
+
+### F1 – Validation trước khi chạy
+
+#### Vấn đề
+Hiện tại nếu người dùng nhấn "Chạy" mà chưa chọn đủ thông tin (Option, Gói thầu, template), `run_batch()` nhận input rỗng và chạy với behavior không xác định — có thể crash, tạo file sai tên, hoặc xóa `3. Files/` mà không tạo file mới.
+
+#### Mục tiêu
+Chặn sớm và thông báo rõ ràng trước khi bất kỳ thao tác file nào xảy ra.
+
+#### Yêu cầu
+
+**F1-01:** Khi nhấn "Chạy", kiểm tra tuần tự theo thứ tự:
+
+| Bước | Điều kiện | Thông báo lỗi |
+|---|---|---|
+| 1 | Option đã được chọn | "Vui lòng chọn quy trình trước" |
+| 2 | Gói thầu đã được chọn | "Vui lòng chọn gói thầu trước" |
+| 3 | Ít nhất 1 template được check | "Vui lòng chọn ít nhất 1 file template" |
+| 4 | Thư mục `2. Templates/{Option}/` tồn tại | "Không tìm thấy thư mục Templates/{Option}" |
+| 5 | Tất cả file template được chọn tồn tại trên disk | "Không tìm thấy file: {tên file}" |
+| 6 | DataSet đã load thành công (ds không phải None) | "Dữ liệu chưa được tải. Khởi động lại app." |
+
+**F1-02:** Nếu bất kỳ bước nào fail → dừng ngay, hiển thị thông báo lỗi ở `status_text`, không xóa `3. Files/`, không copy file nào.
+
+**F1-03:** Validation chạy đồng bộ (không phải async) để kết quả hiển thị ngay lập tức trước khi progress bar xuất hiện.
+
+**F1-04:** Thông báo lỗi hiển thị ở `status_text` với prefix `⚠️` — không dùng popup/modal (Gradio không hỗ trợ tốt).
+
+#### Triển khai
+
+```python
+def validate_inputs(option_key, package_label, selected_templates) -> tuple[bool, str]:
+    """Trả về (is_valid, error_message). is_valid=True nếu tất cả điều kiện thỏa."""
+    if not option_key:
+        return False, "⚠️ Vui lòng chọn quy trình trước"
+    if not package_label:
+        return False, "⚠️ Vui lòng chọn gói thầu trước"
+    if not selected_templates:
+        return False, "⚠️ Vui lòng chọn ít nhất 1 file template"
+    if ds is None:
+        return False, "⚠️ Dữ liệu chưa được tải. Vui lòng khởi động lại app."
+    # Kiểm tra file tồn tại
+    opt = option_key.split(":")[0].strip()
+    template_dir = config.template_path / opt
+    if not template_dir.exists():
+        return False, f"⚠️ Không tìm thấy thư mục: {template_dir}"
+    return True, ""
+
+# Trong run_batch():
+is_valid, err_msg = validate_inputs(option_key, package_label, selected_templates)
+if not is_valid:
+    yield [], err_msg
+    return
+```
+
+---
+
+### F2 – Dry-run / Preview mode
+
+#### Vấn đề
+Không có cách nào biết liệu data trong Excel có đủ cho tất cả placeholder trong template không, cho đến khi chạy thật và nhận được lỗi hoặc file output trống. Với gói thầu có 10+ file template, việc discover lỗi config sau khi chạy rất tốn thời gian.
+
+#### Mục tiêu
+Cho phép người dùng "xem trước" kết quả merge mà không tạo file thật — chỉ cần biết placeholder nào được điền, placeholder nào thiếu data.
+
+#### Yêu cầu
+
+**F2-01:** Thêm nút "🔍 Kiểm tra" (bên cạnh nút "🚀 Chạy") trong Tab 2.
+
+**F2-02:** Khi nhấn "Kiểm tra", thực hiện validation F1 trước. Nếu pass → tiến hành dry-run.
+
+**F2-03:** Dry-run thực hiện cho từng template được chọn:
+- Scan tất cả placeholder `{{key}}` trong file Word (dùng `docxtpl.get_undeclared_template_variables()`)
+- Build context dict như bình thường (query DuckDB)
+- So sánh: key nào có trong context, key nào thiếu
+- Với table placeholder: kiểm tra có dòng tương ứng trong sheet `Tables` không, range có hợp lệ không
+- **Không** tạo file output, **không** xóa `3. Files/`
+
+**F2-04:** Kết quả dry-run hiển thị dạng bảng trong Tab 3:
+
+| File template | Placeholder | Trạng thái | Giá trị (preview) |
+|---|---|---|---|
+| 3. Yeu cau bao gia | `{{HoTen}}` | ✅ Có data | Nguyễn Văn A |
+| 3. Yeu cau bao gia | `{{NgayKy\|date}}` | ✅ Có data | 01/07/2026 |
+| 3. Yeu cau bao gia | `{{CDT_DiaChi}}` | ❌ Thiếu data | – |
+| 3. Yeu cau bao gia | `{{DanhMuc}}` | ✅ Table OK | Sheet S.DanhMuc, A1:F18 |
+| 14. Hop dong | `{{SoHD}}` | ⚠️ Rỗng | "" |
+
+**F2-05:** Tổng kết sau dry-run:
+```
+✅ 3 file sẵn sàng chạy
+⚠️ 1 file có warning (giá trị rỗng)
+❌ 1 file thiếu data (sẽ lỗi nếu chạy thật)
+```
+
+**F2-06:** Sau khi xem kết quả dry-run, người dùng có thể nhấn "🚀 Chạy" ngay — không cần chọn lại từ đầu.
+
+**F2-07:** Preview value bị truncate nếu dài hơn 50 ký tự — hiển thị `"Nguyễn Văn A..."`.
+
+#### UI
+
+```
+Tab 2:
+[🔍 Kiểm tra]  [🚀 Chạy]   ← 2 nút nằm cạnh nhau
+
+Tab 3 (sau dry-run):
+  Chế độ: Kiểm tra (không tạo file)
+  ─────────────────────────────────
+  [Bảng kết quả per-placeholder]
+  ─────────────────────────────────
+  ✅ 3 sẵn sàng  ⚠️ 1 warning  ❌ 1 thiếu data
+```
+
+---
+
+### F3 – Retry cho file lỗi
+
+#### Vấn đề
+Nếu 1 trong 10 file bị lỗi (file Word bị lock, template bị corrupt, placeholder sai tên...), phải chạy lại toàn bộ batch — mất thời gian, xóa lại `3. Files/`, overwrite các file đã OK.
+
+#### Mục tiêu
+Chạy lại chỉ các file bị lỗi mà không ảnh hưởng đến các file đã thành công.
+
+#### Yêu cầu
+
+**F3-01:** Sau khi batch kết thúc, nếu có ít nhất 1 file ❌ → hiển thị nút "🔄 Chạy lại file lỗi".
+
+**F3-02:** Nút này chỉ hiện khi có lỗi; ẩn khi tất cả file thành công.
+
+**F3-03:** Khi nhấn "Chạy lại file lỗi":
+- Lấy danh sách template tương ứng với các dòng ❌ trong log
+- **Không** xóa `3. Files/` (giữ nguyên các file đã OK)
+- **Không** copy lại file đã OK từ Templates
+- Chỉ copy và xử lý lại các template bị lỗi
+- Context (Option + Gói thầu) giữ nguyên từ lần chạy trước
+
+**F3-04:** Sau retry, cập nhật log: dòng lỗi cũ được thay bằng kết quả mới (✅ hoặc ❌ với lý do mới).
+
+**F3-05:** Có thể retry nhiều lần liên tiếp.
+
+**F3-06:** Lưu trạng thái retry trong `gr.State` — reset về None khi người dùng nhấn "Chọn lại từ đầu" hoặc thay đổi Option/Gói thầu.
+
+#### State cần thêm
+
+```python
+last_run_state = gr.State(None)
+# last_run_state = {
+#   "option_key": "Opt1: ...",
+#   "package_label": "1. MS26-01 ...",
+#   "all_results": [{"template": "...", "status": "❌", "error": "..."}],
+#   "failed_templates": ["3. Yeu cau bao gia", "14. Hop dong"]
+# }
+```
+
+---
+
+### F4 – Export log ra file
+
+#### Vấn đề
+Log hiện tại chỉ hiển thị trên UI Gradio. Khi đóng app hoặc chạy lại → log mất hoàn toàn. Không có cách nào tra cứu "lần trước tôi đã xử lý những file gì, có lỗi gì không".
+
+#### Mục tiêu
+Tự động ghi log mỗi lần chạy ra file text, lưu tại thư mục dự án.
+
+#### Yêu cầu
+
+**F4-01:** Tạo thư mục `logs/` trong `{ProjectPath}/` nếu chưa có.
+
+**F4-02:** Mỗi lần chạy (kể cả dry-run và retry) tạo 1 file log mới:
+```
+logs/
+├── 2026-07-29_143022_MS26-01_Opt1.log
+├── 2026-07-29_150011_MS26-02_Opt1.log   
+└── 2026-07-29_161533_MS26-01_Opt1_retry.log   ← suffix "_retry" nếu là retry
+```
+Pattern tên file: `{YYYY-MM-DD}_{HHmmss}_{GoiThau_ID}_{Option}.log`
+
+**F4-03:** Nội dung file log:
+```
+=====================================
+KisorDoc – Run Log
+=====================================
+Thời gian     : 2026-07-29 14:30:22
+Option        : Opt1 – Các giấy tờ đến bước Hợp đồng
+Gói thầu      : MS26-01 – XLNT Bệnh viện Sản Nhi
+Chế độ        : Chạy thật / Dry-run / Retry
+Tổng file     : 5
+=====================================
+
+[14:30:22] ✅ 0. Danh muc.A-MS26-01.docx
+[14:30:24] ✅ 3. Yeu cau bao gia-MS26-01.docx
+[14:30:25] ❌ 5. QD phe duyet-MS26-01.docx
+           Lỗi: PermissionError – File đang được mở bởi ứng dụng khác
+[14:30:27] ⚠️ 14. Hop dong-MS26-01.docx
+           Warning: Placeholder {{CDT_DiaChi}} không có data
+
+=====================================
+Kết quả: 3 thành công / 1 lỗi / 1 warning
+Thời gian chạy: 6.2 giây
+=====================================
+```
+
+**F4-04:** Log được ghi **incremental** trong khi chạy (không đợi đến cuối) — nếu app crash giữa chừng vẫn có log.
+
+**F4-05:** Tự động xóa log cũ hơn 30 ngày khi app khởi động (giữ tối đa 100 file log).
+
+**F4-06:** Thêm nút "📋 Mở thư mục log" trong Tab 3 (cạnh nút "📂 Mở thư mục output").
+
+**F4-07:** Log encoding: UTF-8 với BOM (`utf-8-sig`) để mở đúng trong Notepad Windows.
+
+#### Triển khai
+
+```python
+import logging
+from pathlib import Path
+
+def setup_run_logger(config, goi_thau_id, option, mode="run") -> tuple[logging.Logger, Path]:
+    log_dir = config.project_path / "logs"
+    log_dir.mkdir(exist_ok=True)
+    
+    ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    suffix = f"_{mode}" if mode != "run" else ""
+    log_file = log_dir / f"{ts}_{goi_thau_id}_{option}{suffix}.log"
+    
+    logger = logging.getLogger(f"kisordoc_{ts}")
+    handler = logging.FileHandler(log_file, encoding="utf-8-sig")
+    handler.setFormatter(logging.Formatter("[%(asctime)s] %(message)s", "%H:%M:%S"))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    
+    return logger, log_file
+```
+
+---
+
+### F5 – Version pin cho Config/Tables sheet
+
+#### Vấn đề
+Người dùng có thể vô tình sửa sheet `Config` hoặc `Tables` trong Excel giữa các lần chạy (thêm/xóa/đổi tên cột, thay đổi mapping). Không có cách nào biết config đang dùng là version nào, hay đã bị thay đổi gì so với lần chạy trước.
+
+#### Mục tiêu
+Snapshot config mỗi lần chạy để có thể đối chiếu khi có vấn đề.
+
+#### Yêu cầu
+
+**F5-01:** Khi bắt đầu mỗi lần chạy (sau validation, trước khi xử lý file), snapshot nội dung 2 sheet quan trọng:
+- Sheet `Config` → JSON object `{key: col_name}`
+- Sheet `Tables` → list of dicts `[{GoiThau_ID, Word, Name, Sheet, Range, Hide}]`
+
+**F5-02:** Lưu snapshot cùng file log (thêm vào cuối file `.log`):
+```
+=====================================
+CONFIG SNAPSHOT
+=====================================
+{"KHLCNT_TTr": "KHLCNT_TTr", "HoTen_NguoiLap": "HoTen_NguoiLap", ...}
+
+TABLES SNAPSHOT (filter GoiThau_ID = MS26-01)
+[{"Word": "Danh muc", "Name": "DanhMuc", "Sheet": "S.DanhMuc", "Range": "A1:F", "Hide": ""}]
+=====================================
+```
+
+**F5-03:** Khi app khởi động, so sánh config hiện tại với snapshot của lần chạy gần nhất cho cùng gói thầu:
+- Nếu có thay đổi → hiển thị banner `⚠️ Config đã thay đổi so với lần chạy trước` kèm diff đơn giản
+- Nếu không thay đổi → không hiển thị gì
+
+**F5-04:** Diff hiển thị dạng đơn giản:
+```
+⚠️ Config thay đổi so với lần chạy trước (2026-07-28 15:30):
+  + Thêm mới: CDT_DiaChiDayDu → Dia_Chi_CDT_Full
+  - Xóa: CDT_DiaChi
+  ~ Đổi: HoTen_NguoiLap: "Ho_Ten" → "Ho_Ten_NLP"
+```
+
+**F5-05:** Diff chỉ hiển thị 1 lần khi app load, không lặp lại trong session.
+
+**F5-06:** Nút "Bỏ qua cảnh báo" để dismiss banner.
+
+#### Lưu ý
+Tính năng này hoàn toàn informational — không block việc chạy, chỉ cảnh báo.
+
+---
+
+### F6 – Xử lý file đang mở (File Locked)
+
+#### Vấn đề
+Khi KisorDoc ghi file output vào `3. Files/` mà file đó đang mở trong Microsoft Word (hoặc đang được process khác giữ), Python raise `PermissionError`. Hiện tại lỗi này bị catch chung cùng tất cả exception khác → người dùng thấy thông báo lỗi khó hiểu và không biết cách xử lý.
+
+#### Mục tiêu
+Phát hiện riêng lỗi file locked, thông báo rõ ràng, và cung cấp cơ chế retry tự động.
+
+#### Yêu cầu
+
+**F6-01:** Phân biệt `PermissionError` khỏi các exception khác trong `run_batch()`:
+
+```python
+except PermissionError as e:
+    if "being used by another process" in str(e) or e.errno == 13:
+        # File locked
+        results.append(f"🔒 {tpl_name}: File đang mở – vui lòng đóng lại và thử lại")
+    else:
+        results.append(f"❌ {tpl_name}: Lỗi quyền truy cập – {e}")
+```
+
+**F6-02:** Khi phát hiện file locked → tự động retry tối đa **3 lần**, mỗi lần chờ **2 giây**:
+```
+Lần 1 → PermissionError → chờ 2s → thử lại
+Lần 2 → PermissionError → chờ 2s → thử lại  
+Lần 3 → PermissionError → dừng, báo lỗi 🔒
+```
+
+**F6-03:** Trong thời gian chờ retry, hiển thị trạng thái:
+```
+🔒 14. Hop dong: File đang bị khóa – thử lại lần 1/3 sau 2 giây...
+```
+
+**F6-04:** Thông báo lỗi cuối cùng (sau 3 lần thất bại) phải dễ hiểu:
+```
+🔒 14. Hop dong-MS26-01.docx: Không thể ghi file vì đang được mở trong Word.
+   → Vui lòng đóng file này và nhấn "🔄 Chạy lại file lỗi"
+```
+
+**F6-05:** File locked được đánh dấu là `🔒` (khác `❌`) trong log để người dùng biết nguyên nhân cụ thể và cách xử lý.
+
+**F6-06:** Nếu tất cả file lỗi đều là `🔒` (không có `❌`), nút "Chạy lại file lỗi" đổi label thành "🔄 Chạy lại (đã đóng file chưa?)".
+
+**F6-07:** Cũng áp dụng logic retry cho bước **đọc** file template (khi `copy_templates_to_output` fail do template đang mở trong Word).
+
+#### Hàm tiện ích
+
+```python
+import time, errno
+
+def write_with_retry(func, max_retries=3, delay=2.0, yield_fn=None):
+    """
+    Wrapper retry cho bất kỳ thao tác file nào.
+    yield_fn: callable(msg) để update UI trong khi chờ.
+    """
+    for attempt in range(1, max_retries + 1):
+        try:
+            return func()
+        except PermissionError as e:
+            if attempt == max_retries:
+                raise
+            msg = f"🔒 File bị khóa – thử lại lần {attempt}/{max_retries} sau {delay:.0f}s..."
+            if yield_fn:
+                yield_fn(msg)
+            time.sleep(delay)
+```
+
+---
+
+### Thứ tự implement
+
+```
+F1 (Validation)     ← Làm trước, dễ, chặn nhiều lỗi ngay
+    ↓
+F6 (File locked)    ← Làm sớm, hay gặp trong thực tế
+    ↓
+F4 (Export log)     ← Nền tảng cho F5, làm trước F5
+    ↓
+F3 (Retry)          ← Phụ thuộc vào log state từ F4
+    ↓
+F2 (Dry-run)        ← Độc lập, làm sau khi pipeline ổn
+    ↓
+F5 (Version pin)    ← Nice-to-have, làm cuối
+```
+
+---
+
+### Điểm mở cần xác nhận
+
+| # | Câu hỏi |
+|---|---|
+| Q-01 | F2 Dry-run: Preview value có cần hiển thị sau khi áp dụng filter không? (VD: `{{NgayKy\|date}}` → hiện `"01/07/2026"` hay hiện giá trị raw `"01/07/2026 00:00:00"`) |
+| Q-02 | F4 Log: Có cần ghi log vào database (SQLite) để query/filter sau không, hay file text là đủ? |
+| Q-03 | F5 Version pin: So sánh config với lần chạy gần nhất cho **cùng gói thầu** hay gần nhất **không phân biệt gói thầu**? |
+| Q-04 | F6 Retry: Delay 2 giây mỗi lần retry có phù hợp không, hay cần user configure? |
