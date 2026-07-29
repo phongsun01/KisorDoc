@@ -1,7 +1,7 @@
 # PRD – Word Batch Processor (KisorDoc-AI)
-**Phiên bản:** 2.2  
-**Ngày:** 2026-07-28  
-**Trạng thái:** Production Ready (ver1.3)
+**Phiên bản:** 2.3  
+**Ngày:** 2026-07-29  
+**Trạng thái:** Production Ready (ver1.10)
 
 ---
 
@@ -703,7 +703,7 @@ Tab 3 (sau dry-run):
 
 ---
 
-### F3 – Retry cho file lỗi
+### F3 – Retry cho file lỗi ✅ (ver1.10)
 
 #### Vấn đề
 Nếu 1 trong 10 file bị lỗi (file Word bị lock, template bị corrupt, placeholder sai tên...), phải chạy lại toàn bộ batch — mất thời gian, xóa lại `3. Files/`, overwrite các file đã OK.
@@ -870,7 +870,7 @@ Tính năng này hoàn toàn informational — không block việc chạy, chỉ
 
 ---
 
-### F6 – Xử lý file đang mở (File Locked)
+### F6 – Xử lý file đang mở (File Locked) ✅ (ver1.10)
 
 #### Vấn đề
 Khi KisorDoc ghi file output vào `3. Files/` mà file đó đang mở trong Microsoft Word (hoặc đang được process khác giữ), Python raise `PermissionError`. Hiện tại lỗi này bị catch chung cùng tất cả exception khác → người dùng thấy thông báo lỗi khó hiểu và không biết cách xử lý.

@@ -1,4 +1,5 @@
 import asyncio
+import errno
 import sys
 import threading
 import time
@@ -19,6 +20,7 @@ from dataset import DataSet
 from file_utils import clear_output_folder, copy_templates_to_output, rename_output, open_output_folder
 from merger import mail_merge_safe
 from table_copier import copy_tables_for_file
+import shutil
 
 config: AppConfig | None = None
 ds: DataSet | None = None
@@ -136,20 +138,36 @@ def make_nested_dict(flat_dict: dict) -> dict:
     return nested
 
 
+def write_with_retry(func, max_retries=3, delay=2.0, yield_fn=None):
+    for attempt in range(1, max_retries + 1):
+        try:
+            return func()
+        except PermissionError as e:
+            if "being used by another process" in str(e) or e.errno == errno.EACCES:
+                if attempt == max_retries:
+                    raise
+                msg = f"🔒 File bị khóa – thử lại lần {attempt}/{max_retries} sau {delay:.0f}s..."
+                if yield_fn:
+                    yield_fn(msg)
+                time.sleep(delay)
+            else:
+                raise
+
+
 async def run_batch(option_key: str, package_label: str, selected_templates: list[str],
-                          progress: gr.Progress = gr.Progress()):
+                          progress: gr.Progress = gr.Progress(), retry_state: dict | None = None):
     import time
 
     global config, ds
 
     if not option_key or not option_key.strip():
-        yield "", "⚠️ Vui lòng chọn quy trình"
+        yield "", "⚠️ Vui lòng chọn quy trình", None
         return
     if not package_label or not package_label.strip():
-        yield "", "⚠️ Vui lòng chọn gói thầu"
+        yield "", "⚠️ Vui lòng chọn gói thầu", None
         return
     if not selected_templates or len(selected_templates) == 0:
-        yield "", "⚠️ Vui lòng chọn ít nhất 1 template"
+        yield "", "⚠️ Vui lòng chọn ít nhất 1 template", None
         return
 
     opt = option_key.split(":")[0].strip() if ":" in option_key else option_key
@@ -163,7 +181,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
             break
 
     if not selected_pkg:
-        yield "", "❌ Không tìm thấy gói thầu đã chọn"
+        yield "", "❌ Không tìm thấy gói thầu đã chọn", None
         return
 
     goi_thau_id = _str(selected_pkg.get("GoiThau_ID"))
@@ -217,49 +235,122 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
 
     if progress:
         progress(0, desc="Bắt đầu xử lý...")
-    yield "", "Bắt đầu..."
+    yield "", "Bắt đầu...", None
 
-    clear_output_folder(config)
+    # F3+F6: Nếu là retry, chỉ xử lý các template bị lỗi; nếu không thì xóa folder và chạy lại
+    if retry_state:
+        # Retry: chỉ copy và xử lý các template bị lỗi
+        failed_names = retry_state.get("failed_templates", [])
+        template_filenames, template_names = [], []
+        for r in get_workflow_templates(option_key, package_label):
+            if r.get("Name", "") in failed_names:
+                fname_raw = _str(r.get("File", ""))
+                fname = fname_raw if fname_raw.endswith(".docx") else fname_raw + ".docx"
+                template_filenames.append(fname)
+                template_names.append(r.get("Name", ""))
+        # Copy template bị lỗi vào output (không xóa folder) with retry
+        copied = []
+        template_names_actual = []
+        src_dir = config.template_path / opt
+        for fname, tname in zip(template_filenames, template_names):
+            src = src_dir / fname
+            if not src.exists():
+                possible = list(src_dir.glob(f"{fname}*"))
+                if possible:
+                    src = possible[0]
+                else:
+                    continue
+            dst = config.output_path / src.name
+            def do_copy(s=src, d=dst):
+                shutil.copy2(s, d)
+            try:
+                write_with_retry(do_copy, max_retries=3, delay=2.0)
+                copied.append(dst)
+                template_names_actual.append(tname)
+            except PermissionError:
+                # Skip file locked during copy – will be caught in processing loop
+                copied.append(dst)
+                template_names_actual.append(tname)
+        template_names = template_names_actual
+    else:
+        # Run mới: xóa folder và copy tất cả
+        clear_output_folder(config)
+        template_filenames, template_names = [], []
+        for r in get_workflow_templates(option_key, package_label):
+            if r.get("Name", "") in selected_templates:
+                fname_raw = _str(r.get("File", ""))
+                fname = fname_raw if fname_raw.endswith(".docx") else fname_raw + ".docx"
+                template_filenames.append(fname)
+                template_names.append(r.get("Name", ""))
+        copied = copy_templates_to_output(config, opt, template_filenames)
 
-    template_filenames, template_names = [], []
-    for r in get_workflow_templates(option_key, package_label):
-        if r.get("Name", "") in selected_templates:
-            fname_raw = _str(r.get("File", ""))
-            fname = fname_raw if fname_raw.endswith(".docx") else fname_raw + ".docx"
-            template_filenames.append(fname)
-            template_names.append(r.get("Name", ""))
-
-    copied = copy_templates_to_output(config, opt, template_filenames)
     total = len(copied)
     results = []
     used_names: set[str] = set()
     start_time = time.time()
+    has_locked = False
+    has_other_error = False
+    failed_templates: list[str] = []
 
     for i, (src_path, tpl_name) in enumerate(zip(copied, template_names)):
         if progress:
             progress((i + 1) / total, desc=f"Đang xử lý: {tpl_name}")
         try:
-            ok, err = mail_merge_safe(src_path, nested_context, src_path)
+            def do_merge(s=src_path):
+                return mail_merge_safe(s, nested_context, s)
+
+            def on_locked_retry(msg):
+                if progress:
+                    progress((i + 1) / total, desc=f"{tpl_name}: {msg}")
+
+            ok, err = write_with_retry(do_merge, max_retries=3, delay=2.0, yield_fn=on_locked_retry)
             if not ok:
                 raise RuntimeError(err)
 
             if danh_muc_file and danh_muc_file.exists():
                 try:
                     copy_tables_for_file(src_path, config, goi_thau_id, tables_rows, danh_muc_file)
+                except PermissionError as table_err:
+                    if "being used by another process" in str(table_err) or getattr(table_err, 'errno', None) == errno.EACCES:
+                        raise PermissionError(table_err) from table_err
+                    raise
                 except Exception as table_err:
                     print(f"⚠️  Lỗi copy bảng: {table_err}")
 
             new_path = rename_output(src_path, goi_thau_id, used_names)
             results.append(f"✅ {tpl_name} → {new_path.name}")
+
+        except PermissionError as e:
+            if "being used by another process" in str(e) or getattr(e, 'errno', None) == errno.EACCES:
+                has_locked = True
+                failed_templates.append(tpl_name)
+                results.append(f"🔒 {tpl_name}: Không thể ghi file vì đang được mở trong Word.\n   → Vui lòng đóng file này và nhấn \"🔄 Chạy lại file lỗi\"")
+            else:
+                has_other_error = True
+                failed_templates.append(tpl_name)
+                results.append(f"❌ {tpl_name}: Lỗi quyền truy cập – {e}")
+
         except Exception as e:
+            has_other_error = True
+            failed_templates.append(tpl_name)
             results.append(f"❌ {tpl_name}: {e}")
 
-        yield "\n".join(results), f"Đang xử lý {i + 1}/{total}..."
+        yield "\n".join(results), f"Đang xử lý {i + 1}/{total}...", None
 
     elapsed = time.time() - start_time
     ok_count = sum(1 for r in results if r.startswith("✅"))
     summary = f"Hoàn thành {ok_count}/{total} file trong {elapsed:.1f}s"
-    yield "\n".join(results), summary
+
+    retry_state_data = None
+    if failed_templates:
+        retry_state_data = {
+            "option_key": option_key,
+            "package_label": package_label,
+            "failed_templates": failed_templates,
+            "all_locked": has_locked and not has_other_error,
+        }
+
+    yield "\n".join(results), summary, retry_state_data
 
 
 def create_ui():
@@ -268,7 +359,9 @@ def create_ui():
     _sel = {"opt": "", "pkg": ""}
 
     with gr.Blocks(title=config.AppName) as app:
-        gr.Markdown(f"# {config.AppName} – Xử lý Word tự động")
+        gr.Markdown(f"# {config.AppName} – Xử lý tài liệu tự động")
+
+        last_run_state = gr.State(None)
 
         with gr.Tabs() as tabs:
             with gr.Tab("1. Chọn & Chạy", id=0):
@@ -278,15 +371,15 @@ def create_ui():
                         options = get_options()
                         option_radio = gr.Radio(choices=options, label="Chọn quy trình")
 
-                    goi_thau_rows = ds.query("SELECT * FROM GoiThau ORDER BY CAST(TT AS INTEGER)")
-                    packages = []
-                    for r in goi_thau_rows:
-                        packages.append(f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}")
-                    package_radio = gr.Radio(choices=packages, label="Chọn gói thầu")
+                        goi_thau_rows = ds.query("SELECT * FROM GoiThau ORDER BY CAST(TT AS INTEGER)")
+                        packages = []
+                        for r in goi_thau_rows:
+                            packages.append(f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}")
+                        package_radio = gr.Radio(choices=packages, label="Chọn gói thầu")
 
-                    with gr.Group():
-                        gr.Markdown("**Preview thông tin gói thầu:**")
-                        pkg_preview = gr.Textbox(label="", interactive=False, max_lines=4)
+                        with gr.Group():
+                            gr.Markdown("**Preview thông tin gói thầu:**")
+                            pkg_preview = gr.Textbox(label="", interactive=False, max_lines=4)
 
                     with gr.Column(scale=1):
                         gr.Markdown("### Chọn file template & Chạy")
@@ -299,19 +392,20 @@ def create_ui():
 
                         run_btn = gr.Button("🚀 Chạy", variant="primary", size="lg")
 
-        with gr.Tab("2. Log & Kết quả", id=1):
-            gr.Markdown("### Kết quả xử lý")
-            result_log = gr.Textbox(
-                label="Chi tiết kết quả",
-                interactive=False,
-                lines=15,
-                max_lines=20,
-            )
-            status_text = gr.Textbox(label="Trạng thái", interactive=False)
+            with gr.Tab("2. Log & Kết quả", id=1):
+                gr.Markdown("### Kết quả xử lý")
+                result_log = gr.Textbox(
+                    label="Chi tiết kết quả",
+                    interactive=False,
+                    lines=15,
+                    max_lines=20,
+                )
+                status_text = gr.Textbox(label="Trạng thái", interactive=False)
 
-            with gr.Row():
-                open_folder_btn = gr.Button("📂 Mở thư mục output", visible=False)
-                rerun_btn = gr.Button("← Chạy lại", variant="secondary")
+                with gr.Row():
+                    open_folder_btn = gr.Button("📂 Mở thư mục output", visible=False)
+                    rerun_btn = gr.Button("← Chạy lại", variant="secondary")
+                    retry_btn = gr.Button("🔄 Chạy lại file lỗi", variant="stop", visible=False)
 
         def on_package_change(pkg):
             details = get_package_details(pkg)
@@ -323,19 +417,19 @@ def create_ui():
 
             opt = _sel["opt"]
             if not opt or not pkg:
-                return preview_text, gr.update(choices=[], value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)")
+                return preview_text, gr.update(choices=[], value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)"), None, gr.update(visible=False)
 
             templates = get_workflow_templates(opt, pkg)
             choices = [t.get("Name", "") for t in templates]
             label_text = f"**Chọn template cần xử lý** ({len(choices)} file)"
             _sel["pkg"] = pkg
 
-            return preview_text, gr.update(choices=choices, value=[]), gr.update(value=label_text)
+            return preview_text, gr.update(choices=choices, value=[]), gr.update(value=label_text), None, gr.update(visible=False)
 
         package_radio.change(
             fn=on_package_change,
             inputs=[package_radio],
-            outputs=[pkg_preview, template_checkboxes, template_label]
+            outputs=[pkg_preview, template_checkboxes, template_label, last_run_state, retry_btn]
         )
 
         def on_option_change(opt):
@@ -344,13 +438,15 @@ def create_ui():
                 gr.update(value=None),
                 gr.update(choices=[], value=[]),
                 gr.update(value="**Chọn template cần xử lý** (0 file)"),
-                ""
+                "",
+                None,
+                gr.update(visible=False),
             )
 
         option_radio.change(
             fn=on_option_change,
             inputs=[option_radio],
-            outputs=[package_radio, template_checkboxes, template_label, pkg_preview]
+            outputs=[package_radio, template_checkboxes, template_label, pkg_preview, last_run_state, retry_btn]
         )
 
         def update_checkbox_label(selected):
@@ -374,15 +470,39 @@ def create_ui():
         select_all_btn.click(fn=select_all, outputs=[template_checkboxes])
         deselect_all_btn.click(fn=deselect_all, outputs=[template_checkboxes])
 
+        def get_retry_label(retry_state):
+            if not retry_state or not retry_state.get("failed_templates"):
+                return gr.update(visible=False, interactive=True)
+            n = len(retry_state["failed_templates"])
+            if retry_state.get("all_locked"):
+                return gr.update(visible=True, value=f"🔄 Chạy lại ({n} file – đã đóng file chưa?)", interactive=True)
+            return gr.update(visible=True, value=f"🔄 Chạy lại {n} file lỗi", interactive=True)
+
+        def disable_run():
+            return gr.update(interactive=False)
+
+        def enable_run():
+            return gr.update(interactive=True)
+
         run_event = run_btn.click(
+            fn=disable_run,
+            outputs=[run_btn],
+        ).then(
             fn=run_batch,
             inputs=[option_radio, package_radio, template_checkboxes],
-            outputs=[result_log, status_text],
+            outputs=[result_log, status_text, last_run_state],
             show_progress="full",
             trigger_mode="once",
         ).then(
             lambda: gr.update(visible=True),
             outputs=[open_folder_btn]
+        ).then(
+            get_retry_label,
+            inputs=[last_run_state],
+            outputs=[retry_btn],
+        ).then(
+            enable_run,
+            outputs=[run_btn],
         )
 
         def on_open_folder():
@@ -393,6 +513,49 @@ def create_ui():
                 return f"❌ Lỗi mở thư mục: {e}"
 
         open_folder_btn.click(fn=on_open_folder, outputs=[status_text])
+
+        def on_retry_click(retry_state):
+            if not retry_state or not retry_state.get("failed_templates"):
+                return "⚠️ Không có file lỗi nào để chạy lại", None, gr.update(visible=False)
+            n = len(retry_state["failed_templates"])
+            if retry_state.get("all_locked"):
+                return f"🔄 Đang chạy lại {n} file (đã đóng file chưa?)...", retry_state, gr.update(visible=True)
+            return f"🔄 Đang chạy lại {n} file lỗi...", retry_state, gr.update(visible=True)
+
+        async def run_retry_batch(retry_state, progress=gr.Progress()):
+            if not retry_state or not retry_state.get("failed_templates"):
+                yield "⚠️ Không có file lỗi nào để chạy lại", "⚠️ Không có file lỗi", None
+                return
+            option_key = retry_state["option_key"]
+            package_label = retry_state["package_label"]
+            failed_templates = retry_state["failed_templates"]
+            async for log, status, new_state in run_batch(option_key, package_label, failed_templates, progress, retry_state):
+                yield log, status, new_state
+
+        def disable_retry():
+            return gr.update(interactive=False)
+
+        retry_event = retry_btn.click(
+            fn=disable_retry,
+            outputs=[retry_btn],
+        ).then(
+            fn=on_retry_click,
+            inputs=[last_run_state],
+            outputs=[status_text, last_run_state, retry_btn],
+        ).then(
+            fn=run_retry_batch,
+            inputs=[last_run_state],
+            outputs=[result_log, status_text, last_run_state],
+            show_progress="full",
+            trigger_mode="once",
+        ).then(
+            lambda: gr.update(visible=True),
+            outputs=[open_folder_btn],
+        ).then(
+            get_retry_label,
+            inputs=[last_run_state],
+            outputs=[retry_btn],
+        )
 
         def on_rerun():
             _sel["opt"] = ""
@@ -408,13 +571,16 @@ def create_ui():
                 gr.update(value=[]),
                 gr.update(value=""),
                 gr.update(visible=False),
+                gr.update(visible=False),
+                gr.update(value=""),
                 gr.update(value=""),
                 gr.update(selected=0),
+                None,
             )
 
         rerun_btn.click(
             fn=on_rerun,
-            outputs=[option_radio, package_radio, template_checkboxes, pkg_preview, open_folder_btn, result_log, tabs],
+            outputs=[option_radio, package_radio, template_checkboxes, pkg_preview, open_folder_btn, retry_btn, result_log, status_text, tabs, last_run_state],
         )
 
     return app

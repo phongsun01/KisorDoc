@@ -1,5 +1,5 @@
 # Checklist – KisorDoc-AI (Python)
-**Phiên bản:** 1.0 | **Ngày:** 2026-07-27
+**Phiên bản:** 1.10 | **Ngày:** 2026-07-29
 
 ---
 
@@ -232,9 +232,9 @@ Phase 7 (đóng gói + test)     ⬜ Cần test thực tế
   - [ ] Thêm nút "🔍 Kiểm tra" trong Tab Chọn & Chạy.
   - [ ] Scan các variable và so khớp context mà không ghi đè file thật.
   - [ ] Hiển thị kết quả dry-run chi tiết theo dạng bảng (Có data / Thiếu data / Table OK).
-- [ ] **F3 – Retry cho file lỗi**:
-  - [ ] Hiển thị nút "🔄 Chạy lại file lỗi" nếu kết quả chạy có file ❌.
-  - [ ] Chỉ xử lý lại các file bị lỗi, không xóa/overwrite các file đã xử lý thành công.
+- [x] **F3 – Retry cho file lỗi** (ver1.10):
+  - [x] Hiển thị nút "🔄 Chạy lại file lỗi" nếu kết quả chạy có file ❌.
+  - [x] Chỉ xử lý lại các file bị lỗi, không xóa/overwrite các file đã xử lý thành công.
 - [ ] **F4 – Export log ra file**:
   - [ ] Tạo thư mục `logs/` trong project path.
   - [ ] Ghi log incremental, đặt tên file log theo pattern thời gian, gói thầu và option.
@@ -243,10 +243,10 @@ Phase 7 (đóng gói + test)     ⬜ Cần test thực tế
 - [ ] **F5 – Version pin cho Config/Tables**:
   - [ ] Ghi snapshot cấu hình Config và Tables vào cuối file log.
   - [ ] So sánh cấu hình hiện tại với lần chạy trước của cùng gói thầu và hiển thị banner cảnh báo nếu có diff.
-- [ ] **F6 – Xử lý file đang mở (File Locked)**:
-  - [ ] Bắt riêng lỗi `PermissionError` (lỗi 13 / Locked).
-  - [ ] Tự động retry 3 lần, mỗi lần cách nhau 2 giây kèm cập nhật thông báo trạng thái.
-  - [ ] Đổi tên nút Chạy lại thành "🔄 Chạy lại (đã đóng file chưa?)" nếu toàn bộ lỗi là file locked.
+- [x] **F6 – Xử lý file đang mở (File Locked)** (ver1.10):
+  - [x] Bắt riêng lỗi `PermissionError` (lỗi 13 / Locked).
+  - [x] Tự động retry 3 lần, mỗi lần cách nhau 2 giây kèm cập nhật thông báo trạng thái.
+  - [x] Đổi tên nút Chạy lại thành "🔄 Chạy lại (đã đóng file chưa?)" nếu toàn bộ lỗi là file locked.
 
 ---
 

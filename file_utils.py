@@ -58,8 +58,25 @@ def copy_templates_to_output(config: AppConfig, option: str, filenames: list[str
             else:
                 continue
         dst = config.output_path / src.name
-        shutil.copy2(src, dst)
-        copied.append(dst)
+        
+        # FIX F6-07: Tự động retry khi copy template bị locked
+        max_retries = config.FileMaxRetries
+        delay = config.FileRetryDelay
+        copied_ok = False
+        for attempt in range(1, max_retries + 1):
+            try:
+                shutil.copy2(src, dst)
+                copied_ok = True
+                break
+            except PermissionError as pe:
+                is_lock = (pe.errno == 13 or "permission denied" in str(pe).lower() or "being used" in str(pe).lower())
+                if is_lock and attempt < max_retries:
+                    print(f"⚠️ Template {src.name} bị khóa, đang thử lại lần {attempt}/{max_retries} sau {delay:.1f}s...")
+                    time.sleep(delay)
+                else:
+                    raise pe
+        if copied_ok:
+            copied.append(dst)
     return copied
 
 

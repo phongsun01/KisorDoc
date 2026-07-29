@@ -18,6 +18,8 @@ class AppConfig(BaseModel):
     ExceptionSheet: str = "S."
     AppName: str = "KisorDoc-AI"
     ExcelToWordWidthFactor: int = 90
+    FileRetryDelay: float = 2.0
+    FileMaxRetries: int = 3
 
     @property
     def data_path(self) -> Path:
@@ -48,6 +50,8 @@ def load_config() -> AppConfig:
         "EXCEPTION_SHEET": "ExceptionSheet",
         "APP_NAME": "AppName",
         "EXCEL_TO_WORD_WIDTH_FACTOR": "ExcelToWordWidthFactor",
+        "FILE_RETRY_DELAY": "FileRetryDelay",
+        "FILE_MAX_RETRIES": "FileMaxRetries",
     }
 
     data = {}
@@ -59,6 +63,16 @@ def load_config() -> AppConfig:
                     data[config_key] = int(val)
                 except ValueError:
                     data[config_key] = 90
+            elif config_key == "FileRetryDelay":
+                try:
+                    data[config_key] = float(val)
+                except ValueError:
+                    data[config_key] = 2.0
+            elif config_key == "FileMaxRetries":
+                try:
+                    data[config_key] = int(val)
+                except ValueError:
+                    data[config_key] = 3
             else:
                 data[config_key] = val
 
