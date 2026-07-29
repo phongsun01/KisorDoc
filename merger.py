@@ -9,7 +9,7 @@ def mail_merge(template_path: Path, context: dict, output_path: Path):
     doc = DocxTemplate(str(template_path))
     
     # Initialize Jinja2 Environment and register custom filters
-    jenv = jinja2.Environment()
+    jenv = jinja2.Environment(undefined=jinja2.DebugUndefined)
     jenv.filters["date"] = filter_date
     jenv.filters["date_long"] = filter_date_long
     jenv.filters["number"] = filter_number
@@ -30,7 +30,7 @@ def mail_merge_safe(template_path, context: dict, output_path) -> tuple[bool, st
     tmp = Path(tempfile.mktemp(suffix=".docx"))
     try:
         doc = DocxTemplate(str(template_path))
-        jenv = jinja2.Environment()
+        jenv = jinja2.Environment(undefined=jinja2.DebugUndefined)
         jenv.filters["date"]      = filter_date
         jenv.filters["date_long"] = filter_date_long
         jenv.filters["number"]    = filter_number
