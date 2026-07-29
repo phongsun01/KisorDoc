@@ -146,6 +146,16 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
 
     global config, ds
 
+    if not option_key or not option_key.strip():
+        yield [], "⚠️ Vui lòng chọn quy trình"
+        return
+    if not package_label or not package_label.strip():
+        yield [], "⚠️ Vui lòng chọn gói thầu"
+        return
+    if not selected_templates or len(selected_templates) == 0:
+        yield [], "⚠️ Vui lòng chọn ít nhất 1 template"
+        return
+
     opt = option_key.split(":")[0].strip() if ":" in option_key else option_key
 
     goi_thau_rows = ds.query("SELECT * FROM GoiThau")
@@ -362,25 +372,12 @@ def create_ui():
         select_all_btn.click(fn=select_all, outputs=[template_checkboxes])
         deselect_all_btn.click(fn=deselect_all, outputs=[template_checkboxes])
 
-        def run_with_validation(opt, pkg, templates):
-            if not opt or not opt.strip():
-                return "", "❌ Vui lòng chọn quy trình", gr.update(visible=False)
-            if not pkg or not pkg.strip():
-                return "", "❌ Vui lòng chọn gói thầu", gr.update(visible=False)
-            if not templates or len(templates) == 0:
-                return "", "❌ Vui lòng chọn ít nhất 1 template", gr.update(visible=False)
-            return None, None, gr.update(visible=False)
-
         run_event = run_btn.click(
-            fn=run_with_validation,
-            inputs=[option_radio, package_radio, template_checkboxes],
-            outputs=[result_log, status_text, open_folder_btn],
-            trigger_mode="once",
-        ).then(
             fn=run_batch,
             inputs=[option_radio, package_radio, template_checkboxes],
             outputs=[result_log, status_text],
             show_progress="full",
+            trigger_mode="once",
         ).then(
             lambda: gr.update(visible=True),
             outputs=[open_folder_btn]
