@@ -5,6 +5,10 @@ import time
 import traceback
 from datetime import datetime
 from pathlib import Path
+import pandas as pd
+import socket
+import webbrowser
+import math
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -14,7 +18,7 @@ from config import load_config, AppConfig
 from dataset import DataSet
 from file_utils import clear_output_folder, copy_templates_to_output, rename_output, open_output_folder
 from merger import mail_merge_safe
-from table_copier import copy_tables_for_file, TABLE_PLACEHOLDER_RE
+from table_copier import copy_tables_for_file
 
 config: AppConfig | None = None
 ds: DataSet | None = None
@@ -24,7 +28,6 @@ def _str(val, default=""):
     if val is None:
         return default
     if isinstance(val, float):
-        import math
         if math.isnan(val):
             return default
     return str(val).strip()
@@ -42,8 +45,6 @@ def get_options() -> list[str]:
 
 
 def get_packages(option_key: str) -> list[str]:
-    """FIX #5: Filter packages by option, sorted by TT"""
-    opt_val = option_key.split(":")[0].strip() if ":" in option_key else option_key
     goi_thau_rows = ds.query("SELECT * FROM GoiThau ORDER BY CAST(TT AS INTEGER)")
     packages = []
     for r in goi_thau_rows:
@@ -53,7 +54,6 @@ def get_packages(option_key: str) -> list[str]:
 
 
 def get_package_details(package_label: str) -> dict:
-    """FIX #9: Get package details for preview"""
     if not package_label:
         return {}
     goi_thau_rows = ds.query("SELECT * FROM GoiThau")
@@ -61,26 +61,24 @@ def get_package_details(package_label: str) -> dict:
         label = f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}"
         if label == package_label:
             return {
-                "Tên CĐT": _str(r.get("Tên CĐT", "")),
+                "Tên CĐT": _str(r.get("Chủ đầu tư", "")),
                 "Giá": _str(r.get("Giá gói thầu", "")),
                 "Loại": _str(r.get("GoiThau_Loai", "")),
                 "Số hiệu": _str(r.get("Số hiệu gói thầu", "")),
             }
     return {}
 
+
 def get_workflow_templates(option_key: str, package_label: str) -> list[dict]:
     if not option_key:
         return []
     opt = option_key.split(":")[0].strip() if ":" in option_key else option_key
-
     if not package_label or package_label.strip() == "":
         return []
-
     ws_rows = ds.query("SELECT * FROM Workflow")
     wf_rows = [r for r in ws_rows if _str(r.get("Option")) == opt]
     if not wf_rows:
         return []
-
     goi_thau_rows = ds.query("SELECT * FROM GoiThau")
     selected_pkg = None
     for r in goi_thau_rows:
@@ -88,13 +86,10 @@ def get_workflow_templates(option_key: str, package_label: str) -> list[dict]:
         if label == package_label:
             selected_pkg = r
             break
-
     if not selected_pkg:
         return wf_rows
-
     price = _parse_price(selected_pkg.get("Giá gói thầu", 0))
     goi_thau_loai = _str(selected_pkg.get("GoiThau_Loai"))
-
     filtered = []
     for r in wf_rows:
         pmin = _parse_price(r.get("Price", 0))
@@ -106,7 +101,6 @@ def get_workflow_templates(option_key: str, package_label: str) -> list[dict]:
         if rtype != "ALL" and rtype != goi_thau_loai:
             continue
         filtered.append(r)
-
     return filtered
 
 
@@ -114,7 +108,6 @@ def _parse_price(val) -> float | None:
     if val is None:
         return None
     if isinstance(val, (int, float)):
-        import math
         if math.isnan(val):
             return None
         return float(val)
@@ -137,7 +130,6 @@ def make_nested_dict(flat_dict: dict) -> dict:
             if part not in d:
                 d[part] = {}
             elif not isinstance(d[part], dict):
-                # Fallback if there is a clash
                 d[part] = {"_val": d[part]}
             d = d[part]
         d[parts[-1]] = value
@@ -146,18 +138,13 @@ def make_nested_dict(flat_dict: dict) -> dict:
 
 async def run_batch(option_key: str, package_label: str, selected_templates: list[str],
                           progress=None):
-    """
-    Version đã fix: dùng global config + ds thay vì khởi tạo lại.
-    Copy hàm này vào main.py, thay thế run_batch() cũ.
-    """
     import time, traceback
-    from datetime import datetime
     import gradio as gr
     from file_utils import clear_output_folder, copy_templates_to_output, rename_output, open_output_folder
-    from merger import mail_merge_safe  # dùng version có error handling (FIX 3)
+    from merger import mail_merge_safe
     from table_copier import copy_tables_for_file
 
-    global config, ds  # FIX 2: dùng global thay vì tạo mới
+    global config, ds
 
     opt = option_key.split(":")[0].strip() if ":" in option_key else option_key
 
@@ -174,212 +161,8 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
         return
 
     goi_thau_id = _str(selected_pkg.get("GoiThau_ID"))
-    config_rows = ds.query("SELECT * FROM Config")   # FIX 2: ds thay vì ds_local
-    
-    # Query Tables sheet - check if it exists first
-    try:
-        tables_rows = ds.query("SELECT * FROM Tables")   # FIX 2
-    except Exception:
-        tables_rows = []  # If Tables sheet doesn't exist, skip table copying
-
-    context = {}
-    for r in config_rows:
-        key = _str(r.get("Key"))
-        col = _str(r.get("Value"))
-        if not key or not col:
-            continue
-        clean_key = key.strip("<>{}| ")
-        # Normalize modifier suffix
-        for suffix in (".Date.Long", ".Date", ".Upper", ".Number"):
-            if clean_key.endswith(suffix):
-                clean_key = clean_key[: -len(suffix)]
-                if suffix == ".Date.Long":
-                    clean_key += "_Date"
-                elif suffix == ".Date":
-                    clean_key += "_Date"
-                break
-        if "|" in clean_key:
-            clean_key = clean_key.split("|")[0].strip()
-
-        raw_value = selected_pkg.get(col, "")
-        
-        # Handle pandas NaT first (before checking isinstance datetime)
-        import pandas as pd
-        if pd.isna(raw_value):
-            raw_value = ""
-        elif isinstance(raw_value, datetime):
-            raw_value = raw_value.strftime("%d/%m/%Y")
-        elif raw_value is None:
-            raw_value = ""
-        
-        context[clean_key] = str(raw_value)
-import asyncio
-import sys
-import threading
-import time
-import traceback
-from datetime import datetime
-from pathlib import Path
-import pandas as pd
-import socket
-import webbrowser
-import gradio as gr
-
-sys.stdout.reconfigure(encoding="utf-8")
-
-from config import load_config, AppConfig
-from dataset import DataSet
-from file_utils import clear_output_folder, copy_templates_to_output, rename_output, open_output_folder
-from merger import mail_merge_safe
-from table_copier import copy_tables_for_file
-
-config: AppConfig | None = None
-ds: DataSet | None = None
-
-
-def _str(val, default=""):
-    if val is None:
-        return default
-    if isinstance(val, float):
-        import math
-        if math.isnan(val):
-            return default
-    return str(val).strip()
-
-
-def init():
-    global config, ds
-    config = load_config()
-    ds = DataSet(config)
-
-
-def get_options() -> list[str]:
-    rows = ds.query("SELECT Key, Value FROM Options ORDER BY Key")
-    return [f"{_str(r['Key'])}: {_str(r['Value'])}" for r in rows]
-
-
-def get_packages(option_key: str) -> list[str]:
-    opt_val = option_key.split(":")[0].strip() if ":" in option_key else option_key
-    goi_thau_rows = ds.query("SELECT * FROM GoiThau ORDER BY CAST(TT AS INTEGER)")
-    packages = []
-    for r in goi_thau_rows:
-        label = f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}"
-        packages.append(label)
-    return packages
-
-
-def get_package_details(package_label: str) -> dict:
-    if not package_label:
-        return {}
-    goi_thau_rows = ds.query("SELECT * FROM GoiThau")
-    for r in goi_thau_rows:
-        label = f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}"
-        if label == package_label:
-            return {
-                "Tên CĐT": _str(r.get("Tên CĐT", "")),
-                "Giá": _str(r.get("Giá gói thầu", "")),
-                "Loại": _str(r.get("GoiThau_Loai", "")),
-                "Số hiệu": _str(r.get("Số hiệu gói thầu", "")),
-            }
-    return {}
-
-
-def get_workflow_templates(option_key: str, package_label: str) -> list[dict]:
-    if not option_key:
-        return []
-    opt = option_key.split(":")[0].strip() if ":" in option_key else option_key
-
-    if not package_label or package_label.strip() == "":
-        return []
-
-    ws_rows = ds.query("SELECT * FROM Workflow")
-    wf_rows = [r for r in ws_rows if _str(r.get("Option")) == opt]
-    if not wf_rows:
-        return []
-
-    goi_thau_rows = ds.query("SELECT * FROM GoiThau")
-    selected_pkg = None
-    for r in goi_thau_rows:
-        label = f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}"
-        if label == package_label:
-            selected_pkg = r
-            break
-
-    if not selected_pkg:
-        return wf_rows
-
-    price = _parse_price(selected_pkg.get("Giá gói thầu", 0))
-    goi_thau_loai = _str(selected_pkg.get("GoiThau_Loai"))
-
-    filtered = []
-    for r in wf_rows:
-        pmin = _parse_price(r.get("Price", 0))
-        pmax = _parse_price(r.get("PriceMax", 0))
-        if pmin is not None and pmax is not None and price is not None:
-            if not (pmin <= price <= pmax):
-                continue
-        rtype = _str(r.get("Type"))
-        if rtype != "ALL" and rtype != goi_thau_loai:
-            continue
-        filtered.append(r)
-
-    return filtered
-
-
-def _parse_price(val) -> float | None:
-    if val is None:
-        return None
-    if isinstance(val, (int, float)):
-        import math
-        if math.isnan(val):
-            return None
-        return float(val)
-    s = str(val).strip()
-    if not s:
-        return None
-    s = s.replace(".", "").replace(",", ".")
-    try:
-        return float(s)
-    except ValueError:
-        return None
-
-
-def make_nested_dict(flat_dict: dict) -> dict:
-    nested = {}
-    for key, value in flat_dict.items():
-        parts = key.split(".")
-        d = nested
-        for part in parts[:-1]:
-            if part not in d:
-                d[part] = {}
-            elif not isinstance(d[part], dict):
-                d[part] = {"_val": d[part]}
-            d = d[part]
-        d[parts[-1]] = value
-    return nested
-
-
-async def run_batch(option_key: str, package_label: str, selected_templates: list[str],
-                    progress: gr.Progress = gr.Progress()):
-    global config, ds
-
-    opt = option_key.split(":")[0].strip() if ":" in option_key else option_key
-
-    goi_thau_rows = ds.query("SELECT * FROM GoiThau")
-    selected_pkg = None
-    for r in goi_thau_rows:
-        label = f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}"
-        if label == package_label:
-            selected_pkg = r
-            break
-
-    if not selected_pkg:
-        yield "", "❌ Không tìm thấy gói thầu đã chọn"
-        return
-
-    goi_thau_id = _str(selected_pkg.get("GoiThau_ID"))
     config_rows = ds.query("SELECT * FROM Config")
-    
+
     try:
         tables_rows = ds.query("SELECT * FROM Tables")
     except Exception:
@@ -404,14 +187,14 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
             clean_key = clean_key.split("|")[0].strip()
 
         raw_value = selected_pkg.get(col, "")
-        
+
         if pd.isna(raw_value):
             raw_value = ""
         elif isinstance(raw_value, datetime):
             raw_value = raw_value.strftime("%d/%m/%Y")
         elif raw_value is None:
             raw_value = ""
-        
+
         context[clean_key] = str(raw_value)
 
     nested_context = make_nested_dict(context)
@@ -428,8 +211,9 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
         xlsx_files[0] if xlsx_files else None
     )
 
-    progress(0, desc="Bắt đầu xử lý...")
-    yield "", "Bắt đầu..."
+    if progress:
+        progress(0, desc="Bắt đầu xử lý...")
+    yield [], "Bắt đầu..."
 
     clear_output_folder(config)
 
@@ -448,13 +232,14 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
     start_time = time.time()
 
     for i, (src_path, tpl_name) in enumerate(zip(copied, template_names)):
-        progress((i + 1) / total, desc=f"Đang xử lý: {tpl_name}")
+        if progress:
+            progress((i + 1) / total, desc=f"Đang xử lý: {tpl_name}")
         try:
             if danh_muc_file and danh_muc_file.exists():
                 try:
                     copy_tables_for_file(src_path, config, goi_thau_id, tables_rows, danh_muc_file)
                 except Exception as table_err:
-                    print(f"⚠️ Lỗi copy bảng: {table_err}")
+                    print(f"⚠️  Lỗi copy bảng: {table_err}")
 
             ok, err = mail_merge_safe(src_path, nested_context, src_path)
             if not ok:
@@ -465,12 +250,12 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
         except Exception as e:
             results.append(f"❌ {tpl_name}: {e}")
 
-        yield "\n".join(results), f"Đang xử lý {i + 1}/{total}..."
+        yield results, f"Đang xử lý {i + 1}/{total}..."
 
     elapsed = time.time() - start_time
     ok_count = sum(1 for r in results if r.startswith("✅"))
     summary = f"Hoàn thành {ok_count}/{total} file trong {elapsed:.1f}s"
-    yield "\n".join(results), summary
+    yield results, summary
 
 
 def create_ui():
@@ -502,16 +287,15 @@ def create_ui():
                     gr.Markdown("### Chọn file template & Chạy")
                     template_label = gr.Markdown("**Chọn template cần xử lý** (0 file)")
                     template_checkboxes = gr.CheckboxGroup(label="", choices=[])
-                    
+
                     with gr.Row():
                         select_all_btn = gr.Button("✓ Chọn tất cả")
                         deselect_all_btn = gr.Button("✗ Bỏ chọn tất cả")
-                    
+
                     run_btn = gr.Button("🚀 Chạy", variant="primary", size="lg")
 
         with gr.Tab("2. Log & Kết quả"):
             gr.Markdown("### Kết quả xử lý")
-            
             result_log = gr.Textbox(
                 label="Chi tiết kết quả",
                 interactive=False,
@@ -519,7 +303,7 @@ def create_ui():
                 max_lines=20,
             )
             status_text = gr.Textbox(label="Trạng thái", interactive=False)
-            
+
             with gr.Row():
                 open_folder_btn = gr.Button("📂 Mở thư mục output", visible=False)
                 rerun_btn = gr.Button("← Chạy lại", variant="secondary")
@@ -531,16 +315,16 @@ def create_ui():
             else:
                 lines = [f"{k}: {v}" for k, v in details.items() if v]
                 preview_text = "\n".join(lines)
-            
+
             opt = _sel["opt"]
             if not opt or not pkg:
                 return preview_text, gr.update(choices=[], value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)")
-            
+
             templates = get_workflow_templates(opt, pkg)
             choices = [t.get("Name", "") for t in templates]
             label_text = f"**Chọn template cần xử lý** ({len(choices)} file)"
             _sel["pkg"] = pkg
-            
+
             return preview_text, gr.update(choices=choices, value=[]), gr.update(value=label_text)
 
         package_radio.change(
@@ -610,15 +394,8 @@ def create_ui():
 
         def on_open_folder():
             try:
-                import subprocess
-                cfg = load_config()
-                path = str(cfg.output_path.resolve())
-                import os
-                if os.path.exists(path):
-                    subprocess.Popen(f'explorer "{path}"', shell=True)
-                    return f"✅ Đã mở: {path}"
-                else:
-                    return f"❌ Không tìm thấy thư mục: {path}"
+                open_output_folder(config)
+                return "✅ Thư mục đã mở"
             except Exception as e:
                 return f"❌ Lỗi mở thư mục: {e}"
 
@@ -660,7 +437,7 @@ if __name__ == "__main__":
             break
         except OSError:
             PORT += 1
-    
+
     threading.Thread(target=lambda: webbrowser.open(f"http://127.0.0.1:{PORT}"), daemon=True).start()
     print(f"KisorDoc-AI running at http://127.0.0.1:{PORT}")
     app.launch(server_port=PORT, share=False, quiet=True, inbrowser=False)
