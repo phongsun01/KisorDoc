@@ -356,11 +356,12 @@ def create_ui():
             outputs=[package_radio, template_checkboxes, template_label, pkg_preview]
         )
 
-        def update_checkbox_label():
+        def update_checkbox_label(selected):
             total = len(get_workflow_templates(_sel["opt"], _sel["pkg"]))
-            return gr.update(value=f"**Chọn template cần xử lý** ({total} file)")
+            count = len(selected) if selected else 0
+            return gr.update(value=f"**Chọn template cần xử lý** ({count}/{total} file)")
 
-        template_checkboxes.change(fn=update_checkbox_label, outputs=[template_label])
+        template_checkboxes.change(fn=update_checkbox_label, inputs=[template_checkboxes], outputs=[template_label])
 
         def select_all():
             opt, pkg = _sel["opt"], _sel["pkg"]
