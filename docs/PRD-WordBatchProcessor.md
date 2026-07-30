@@ -104,6 +104,9 @@ Khi bắt đầu, tool quét **tất cả file `.xlsx`** trong thư mục Data v
 |---|---|---|
 | `Key` | Opt1 | Mã option |
 | `Value` | Các giấy tờ đến bước Hợp đồng | Tên hiển thị trên UI |
+| `Sheet` | S.GoiThau hoặc S.MayMuon | Tên sheet dữ liệu chính (KHÔNG dùng tiền tố `S.` để app load vào bộ nhớ) |
+| `Show` | `{TT}. {Số hiệu gói thầu} - {Tên gói thầu}` | Định dạng nhãn hiển thị cho gói thầu (hỗ trợ `{Tên Cột/Tên Biến}`) |
+| `KeyId` | GoiThau_ID | Cột khoá chính duy nhất của dữ liệu |
 
 ### 3.4 Sheet `Workflow` – Định nghĩa template theo option
 
@@ -113,11 +116,14 @@ Khi bắt đầu, tool quét **tất cả file `.xlsx`** trong thư mục Data v
 | `Option` | Opt1 | Thuộc nhóm option nào (để trống = chung cả 2 option) |
 | `Name` | Bảng kê hồ sơ-trên 50 triệu | Tên hiển thị checkbox |
 | `File` | 0. Danh muc.A-Template | Tên file (không cần đuôi `.docx`, không cần `-Template`) |
-| `Price` | 50.000.000 | Giá tối thiểu |
-| `PriceMax` | 500.000.000 | Giá tối đa |
-| `Type` | ALL / XD / MSHH / TUVAN / PHITUVAN | Lọc theo loại gói thầu |
+| `Price` | 50.000.000 | Giá tối thiểu (tương thích ngược) |
+| `PriceMax` | 500.000.000 | Giá tối đa (tương thích ngược) |
+| `Type` | ALL / XD / MSHH / TUVAN / PHITUVAN | Lọc theo loại gói thầu (tương thích ngược) |
+| `Condition` | `{Giá gói thầu} <= 500000000 and {GoiThau_Loai} == 'MSHH'` | Biểu thức logic Python lọc template động (ưu tiên cao nhất) |
 
-> **Quy tắc lọc:** Tool lấy giá gói thầu (`dblPrice`), chỉ hiển thị các template có `Price <= dblPrice <= PriceMax` và `Type` = `ALL` hoặc trùng với `GoiThau_Loai` của gói thầu đã chọn.
+> **Quy tắc lọc:** 
+> 1. Nếu có cột `Condition` và giá trị không trống/ALL: Biểu thức logic trong `{}` sẽ được tự động parse số tĩnh và đối chiếu giá trị thực tế của gói thầu để xác định hiển thị.
+> 2. Nếu không có `Condition` hoặc trống: Fallback tự động lọc theo `Price` (`Price <= dblPrice <= PriceMax`) và `Type` (`ALL` hoặc trùng loại gói thầu).
 
 ### 3.5 Sheet `Tables` – Định nghĩa copy bảng Excel → Word
 
