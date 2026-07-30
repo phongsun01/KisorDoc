@@ -47,6 +47,62 @@ class DataSet:
     def query(self, sql: str) -> list[dict]:
         return self.conn.execute(sql).fetchdf().to_dict(orient="records")
 
+    def query_rows(self, sheet_name: str, row_start: int, row_end: int) -> list[dict]:
+        cache_key = (sheet_name, row_start, row_end)
+        if not hasattr(self, "_rows_cache"):
+            self._rows_cache = {}
+        if cache_key in self._rows_cache:
+            return self._rows_cache[cache_key]
+        res = self._query_rows_impl(sheet_name, row_start, row_end)
+        self._rows_cache[cache_key] = res
+        return res
+
+    def _query_rows_impl(self, sheet_name: str, row_start: int, row_end: int) -> list[dict]:
+        xlsx_files = sorted(self.config.data_path.glob("*.xlsx"))
+        actual_file = None
+        clean_sheet = sheet_name.strip()
+        for f in xlsx_files:
+            if f.name.startswith("~$"):
+                continue
+            try:
+                wb = openpyxl.load_workbook(f, read_only=True)
+                if any(s.strip() == clean_sheet for s in wb.sheetnames):
+                    actual_file = f
+                    wb.close()
+                    break
+                wb.close()
+            except Exception:
+                continue
+
+        if not actual_file:
+            print(f"⚠️  Không tìm thấy sheet '{sheet_name}' trong bất kỳ file Excel nào")
+            return []
+
+        try:
+            wb = openpyxl.load_workbook(actual_file, read_only=True, data_only=True)
+            actual_sheet_name = next(s for s in wb.sheetnames if s.strip() == clean_sheet)
+            ws = wb[actual_sheet_name]
+
+            header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+            if not header_row:
+                wb.close()
+                return []
+            headers = [str(c) if c is not None else f"Col{i}" for i, c in enumerate(header_row)]
+
+            data_rows = []
+            for r in ws.iter_rows(min_row=row_start, max_row=row_end, values_only=True):
+                if any(v is not None for v in r):
+                    row_dict = {}
+                    for i, val in enumerate(r):
+                        if i < len(headers):
+                            row_dict[headers[i]] = val
+                    data_rows.append(row_dict)
+            wb.close()
+            return data_rows
+        except Exception as e:
+            print(f"❌ Lỗi query_rows cho sheet '{sheet_name}': {e}")
+            return []
+
     def get_table(self, name: str) -> pd.DataFrame | None:
         safe = _safe_table_name(name)
         if safe in self.table_names:

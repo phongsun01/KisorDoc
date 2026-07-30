@@ -36,6 +36,17 @@ def _str(val, default=""):
     return str(val).strip()
 
 
+def clean_config_key(key: str) -> str:
+    clean = key.strip("<>{}| ")
+    for suffix in (".Date.Long", ".Date", ".Upper", ".Number"):
+        if clean.endswith(suffix):
+            clean = clean[: -len(suffix)]
+            break
+    if "|" in clean:
+        clean = clean.split("|")[0].strip()
+    return clean
+
+
 def init():
     global config, ds
     config = load_config()
@@ -62,12 +73,43 @@ def get_option_config(option_key: str) -> dict:
                 "sheet": _str(r.get("Sheet"), "GoiThau"),
                 "show": _str(r.get("Show"), "{TT}. {Số hiệu gói thầu} - {Tên gói thầu}"),
                 "key_id": _str(r.get("KeyId"), "GoiThau_ID"),
+                "config_range": _str(r.get("Config"), ""),
             }
     return {
         "sheet": "GoiThau",
         "show": "{TT}. {Số hiệu gói thầu} - {Tên gói thầu}",
         "key_id": "GoiThau_ID",
+        "config_range": "",
     }
+
+
+def _parse_row_range(s: str) -> tuple[int, int] | None:
+    if not s or not s.strip():
+        return None
+    import re
+    m = re.match(r"^(\d+)-(\d+)$", s.strip())
+    if m:
+        try:
+            start = int(m.group(1))
+            end = int(m.group(2))
+            if start <= end:
+                return start, end
+        except ValueError:
+            pass
+    return None
+
+
+def get_config_for_option(option_key: str) -> list[dict]:
+    opt_config = get_option_config(option_key)
+    cfg_range = opt_config.get("config_range", "")
+    parsed = _parse_row_range(cfg_range)
+    if parsed:
+        start, end = parsed
+        return ds.query_rows("Config", start, end)
+    try:
+        return ds.query("SELECT * FROM Config")
+    except Exception:
+        return []
 
 
 def safe_format(pattern: str, row: dict) -> str:
@@ -91,14 +133,7 @@ def check_condition(condition_str: str, raw_row: dict, config_mappings: list[dic
     
     key_to_col = {}
     for mapping in config_mappings:
-        k = _str(mapping.get("Key")).strip("<>{}| ")
-        for suffix in (".Date.Long", ".Date", ".Upper", ".Number"):
-            if k.endswith(suffix):
-                k = k[:-len(suffix)]
-                break
-        if "|" in k:
-            k = k.split("|")[0].strip()
-            
+        k = clean_config_key(_str(mapping.get("Key")))
         c = _str(mapping.get("Value"))
         if k and c:
             key_to_col[k] = c
@@ -115,21 +150,16 @@ def check_condition(condition_str: str, raw_row: dict, config_mappings: list[dic
         
         parsed_val = None
         if val is not None:
-            import pandas as pd
             try:
                 is_na = pd.isna(val)
             except (TypeError, ValueError):
                 is_na = False
-            
+
             if not is_na:
-                if isinstance(val, (int, float)):
-                    parsed_val = val
-                else:
+                parsed_val = _parse_price(val)
+                if parsed_val is None:
                     s_val = str(val).strip()
-                    s_clean = s_val.replace(".", "").replace(",", "")
-                    try:
-                        parsed_val = float(s_clean) if "." in s_clean else int(s_clean)
-                    except ValueError:
+                    if s_val:
                         parsed_val = s_val
         
         eval_context[safe_var] = parsed_val
@@ -165,17 +195,20 @@ def get_packages(option_key: str) -> list[str]:
     return packages
 
 
-def get_package_details(option_key: str, package_label: str) -> dict:
+def get_package_details(option_key: str, package_label: str, sheet_rows: list[dict] | None = None) -> dict:
     if not option_key or not package_label:
         return {}
     opt_config = get_option_config(option_key)
-    sheet = opt_config.get("sheet", "GoiThau")
     show_format = opt_config.get("show", "")
-    
-    try:
-        rows = ds.query(f"SELECT * FROM {sheet}")
-    except Exception:
-        rows = []
+
+    if sheet_rows is not None:
+        rows = sheet_rows
+    else:
+        sheet = opt_config.get("sheet", "GoiThau")
+        try:
+            rows = ds.query(f"SELECT * FROM {sheet}")
+        except Exception:
+            rows = []
         
     for r in rows:
         label = safe_format(show_format, r)
@@ -188,7 +221,7 @@ def get_package_details(option_key: str, package_label: str) -> dict:
     return {}
 
 
-def get_workflow_templates(option_key: str, package_label: str) -> list[dict]:
+def get_workflow_templates(option_key: str, package_label: str, sheet_rows: list[dict] | None = None) -> list[dict]:
     if not option_key or not package_label or package_label.strip() == "":
         return []
     opt = option_key.split(":")[0].strip() if ":" in option_key else option_key.strip()
@@ -202,14 +235,17 @@ def get_workflow_templates(option_key: str, package_label: str) -> list[dict]:
         return []
         
     opt_config = get_option_config(option_key)
-    sheet = opt_config.get("sheet", "GoiThau")
     key_id = opt_config.get("key_id", "GoiThau_ID")
     show_format = opt_config.get("show", "")
     
-    try:
-        main_rows = ds.query(f"SELECT * FROM {sheet}")
-    except Exception:
-        main_rows = []
+    if sheet_rows is not None:
+        main_rows = sheet_rows
+    else:
+        sheet = opt_config.get("sheet", "GoiThau")
+        try:
+            main_rows = ds.query(f"SELECT * FROM {sheet}")
+        except Exception:
+            main_rows = []
         
     selected_pkg = None
     for r in main_rows:
@@ -221,10 +257,7 @@ def get_workflow_templates(option_key: str, package_label: str) -> list[dict]:
     if not selected_pkg:
         return []
         
-    try:
-        config_mappings = ds.query("SELECT * FROM Config")
-    except Exception:
-        config_mappings = []
+    config_mappings = get_config_for_option(option_key)
         
     filtered = []
     for r in wf_rows:
@@ -304,7 +337,7 @@ def run_preview(option_key: str, package_label: str,
     if not selected_pkg:
         return "❌ Không tìm thấy dòng dữ liệu tương ứng"
 
-    config_rows = ds.query("SELECT * FROM Config")
+    config_rows = get_config_for_option(option_key)
     context_keys: set[str] = set()
     missing_keys: list[str] = []
 
@@ -313,13 +346,7 @@ def run_preview(option_key: str, package_label: str,
         col = _str(r.get("Value"))
         if not key or not col:
             continue
-        clean_key = key.strip("<>{}| ")
-        for suffix in (".Date.Long", ".Date", ".Upper", ".Number"):
-            if clean_key.endswith(suffix):
-                clean_key = clean_key[:-len(suffix)]
-                break
-        if "|" in clean_key:
-            clean_key = clean_key.split("|")[0].strip()
+        clean_key = clean_config_key(key)
 
         raw_value = selected_pkg.get(col)
         try:
@@ -371,15 +398,15 @@ def run_preview(option_key: str, package_label: str,
         if _str(t_id) != goi_thau_id:
             continue
         name     = _str(t.get("Name", ""))
-        sheet    = _str(t.get("Sheet", ""))
+        tbl_sheet = _str(t.get("Sheet", ""))
         range_   = _str(t.get("Range", ""))
         hide     = _str(t.get("Hide", ""))
 
         # Đếm số dòng thực tế trong sheet nếu có file
         row_count = "?"
-        if wb and sheet and sheet in wb.sheetnames:
+        if wb and tbl_sheet and tbl_sheet in wb.sheetnames:
             try:
-                ws = wb[sheet]
+                ws = wb[tbl_sheet]
                 # Tính max_row trong range
                 if ":" in range_:
                     parts = range_.split(":")
@@ -445,6 +472,7 @@ class IncrementalRunLogger:
         self.ok_count = 0
         self.error_count = 0
         self.warning_count = 0
+        self._fh = open(self.filepath, "w", encoding="utf-8-sig")
 
     def write_header(self, option_desc, package_desc, total_files):
         time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -460,16 +488,16 @@ Tổng file     : {total_files}
 =====================================
 
 """
-        with open(self.filepath, "w", encoding="utf-8-sig") as f:
-            f.write(header)
+        self._fh.write(header)
+        self._fh.flush()
 
     def log_event(self, emoji, name, extra_info=None):
         time_str = datetime.now().strftime("%H:%M:%S")
         line = f"[{time_str}] {emoji} {name}\n"
         if extra_info:
             line += f"           {extra_info}\n"
-        with open(self.filepath, "a", encoding="utf-8-sig") as f:
-            f.write(line)
+        self._fh.write(line)
+        self._fh.flush()
 
     def write_footer(self):
         elapsed = time.time() - self.start_time
@@ -479,14 +507,12 @@ Kết quả: {self.ok_count} thành công / {self.error_count} lỗi / {self.war
 Thời gian chạy: {elapsed:.1f} giây
 =====================================
 """
-        with open(self.filepath, "a", encoding="utf-8-sig") as f:
-            f.write(footer)
+        self._fh.write(footer)
+        self._fh.close()
 
 
 async def run_batch(option_key: str, package_label: str, selected_templates: list[str],
                           progress: gr.Progress = gr.Progress(), retry_state: dict | None = None):
-
-    global config, ds
 
     if not option_key or not option_key.strip():
         yield "", "⚠️ Vui lòng chọn quy trình", None
@@ -518,7 +544,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
         return
 
     goi_thau_id = _str(selected_pkg.get(key_id))
-    config_rows = ds.query("SELECT * FROM Config")
+    config_rows = get_config_for_option(option_key)
 
     try:
         tables_rows = ds.query("SELECT * FROM Tables")
@@ -531,17 +557,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
         col = _str(r.get("Value"))
         if not key or not col:
             continue
-        clean_key = key.strip("<>{}| ")
-        for suffix in (".Date.Long", ".Date", ".Upper", ".Number"):
-            if clean_key.endswith(suffix):
-                clean_key = clean_key[: -len(suffix)]
-                if suffix == ".Date.Long":
-                    clean_key += "_Date"
-                elif suffix == ".Date":
-                    clean_key += "_Date"
-                break
-        if "|" in clean_key:
-            clean_key = clean_key.split("|")[0].strip()
+        clean_key = clean_config_key(key)
 
         raw_value = selected_pkg.get(col, "")
 
@@ -754,7 +770,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
 def create_ui():
     init()
 
-    _sel = {"opt": "", "pkg": ""}
+    _sel = {"opt": "", "pkg": "", "sheet_rows": [], "template_total": 0}
 
     with gr.Blocks(title=config.AppName) as app:
         gr.Markdown(f"# {config.AppName} – Xử lý tài liệu tự động")
@@ -811,7 +827,8 @@ def create_ui():
 
         def on_package_change(pkg):
             opt = _sel["opt"]
-            details = get_package_details(opt, pkg)
+            sheet_rows = _sel["sheet_rows"]
+            details = get_package_details(opt, pkg, sheet_rows)
             if not details:
                 preview_text = ""
             else:
@@ -819,10 +836,12 @@ def create_ui():
                 preview_text = "\n".join(lines)
 
             if not opt or not pkg:
+                _sel["template_total"] = 0
                 return preview_text, gr.update(choices=[], value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)"), None, gr.update(visible=False), gr.update(visible=False)
 
-            templates = get_workflow_templates(opt, pkg)
+            templates = get_workflow_templates(opt, pkg, sheet_rows)
             choices = [t.get("Name", "") for t in templates]
+            _sel["template_total"] = len(choices)
             label_text = f"**Chọn template cần xử lý** ({len(choices)} file)"
             _sel["pkg"] = pkg
 
@@ -836,7 +855,23 @@ def create_ui():
 
         def on_option_change(opt):
             _sel["opt"] = opt or ""
-            pkgs = get_packages(opt)
+            _sel["sheet_rows"] = []
+            _sel["template_total"] = 0
+            if not opt:
+                pkgs = []
+            else:
+                opt_config = get_option_config(opt)
+                sheet = opt_config.get("sheet", "GoiThau")
+                show_format = opt_config.get("show", "")
+                try:
+                    rows = ds.query(f"SELECT * FROM {sheet} ORDER BY CAST(TT AS INTEGER)")
+                except Exception:
+                    try:
+                        rows = ds.query(f"SELECT * FROM {sheet}")
+                    except Exception:
+                        rows = []
+                _sel["sheet_rows"] = rows
+                pkgs = [label for r in rows if (label := safe_format(show_format, r))]
             return (
                 gr.update(choices=pkgs, value=None),
                 gr.update(choices=[], value=[]),
@@ -854,7 +889,7 @@ def create_ui():
         )
 
         def update_checkbox_label(selected):
-            total = len(get_workflow_templates(_sel["opt"], _sel["pkg"]))
+            total = _sel["template_total"]
             count = len(selected) if selected else 0
             return gr.update(value=f"**Chọn template cần xử lý** ({count}/{total} file)")
 
@@ -864,7 +899,7 @@ def create_ui():
             opt, pkg = _sel["opt"], _sel["pkg"]
             if not opt or not pkg:
                 return gr.update(value=[])
-            templates = get_workflow_templates(opt, pkg)
+            templates = get_workflow_templates(opt, pkg, _sel["sheet_rows"])
             choices = [t.get("Name", "") for t in templates]
             return gr.update(value=choices)
 
@@ -983,6 +1018,8 @@ def create_ui():
         def on_rerun():
             _sel["opt"] = ""
             _sel["pkg"] = ""
+            _sel["sheet_rows"] = []
+            _sel["template_total"] = 0
             initial_options = get_options()
             return (
                 gr.update(choices=initial_options, value=None),
@@ -1009,6 +1046,8 @@ if __name__ == "__main__":
     app = create_ui()
     PORT = 7864
     while True:
+        if PORT > 7900:
+            raise RuntimeError("Không tìm thấy port trống (7864–7900)")
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.bind(('127.0.0.1', PORT))
