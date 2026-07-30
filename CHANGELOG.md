@@ -1,4 +1,16 @@
-﻿# Changelog
+# Changelog
+
+## [2.0.0] - 2026-07-30
+
+### Added
+- **Cấu hình Option động (Dynamic Options):** Hỗ trợ khai báo các cột `Sheet`, `Show`, `KeyId` trong sheet `Options` để tự động hóa định dạng nhãn hiển thị và tên sheet nguồn dữ liệu chính.
+- **Lọc điều kiện động (Dynamic Conditions):** Bổ sung cột `Condition` trong sheet `Workflow` hỗ trợ cú pháp ngoặc nhọn `{Tên cột/Tên biến}` và tự động parse chuỗi số Excel (ví dụ: `150.000.000` -> `150000000`) khi so sánh logic trong Python `eval`.
+- **Phân vùng Config theo Option (Config Range):** Bổ sung cột `Config` trong sheet `Options` cho phép tách biệt các vùng ánh xạ trong sheet Config (ví dụ: `2-97`, `99-253`) tránh xung đột dữ liệu.
+- **Tập lệnh di chuyển nâng cao:** Thêm script `migrate_modifiers.py` hỗ trợ nâng cấp đồng bộ toàn bộ modifier (date, day, month, year, number, chu/text) sang cú pháp bộ lọc Jinja2 `|` chuẩn xác.
+
+### Changed
+- Cải tiến hiệu năng nạp file Excel trong DuckDB dataset bằng cơ chế cache `query_rows` theo range dòng, giúp chỉ mở file 1 lần khi nhiều Option dùng chung phân vùng.
+- Tự động di chuyển toàn bộ file `.bak.docx` sang thư mục con `bak/` tương ứng của từng thư mục quy trình.
 
 ## [1.9.0] - 2026-07-29
 
