@@ -493,8 +493,15 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
             # Check for missing placeholders
             missing_placeholders = []
             try:
+                import jinja2
+                from filters import filter_date, filter_date_long, filter_number
+                jenv = jinja2.Environment()
+                jenv.filters["date"] = filter_date
+                jenv.filters["date_long"] = filter_date_long
+                jenv.filters["number"] = filter_number
+
                 doc = DocxTemplate(str(src_path))
-                undeclared = doc.get_undeclared_template_variables()
+                undeclared = doc.get_undeclared_template_variables(jinja_env=jenv)
                 for var in undeclared:
                     var_clean = var.strip()
                     if var_clean not in nested_context and var_clean not in table_placeholder_names:
