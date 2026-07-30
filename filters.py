@@ -11,6 +11,8 @@ def filter_date(value):
     if not value or str(value).strip() == "":
         now = datetime.now()
         return f"/{now.month:02d}/{now.year}"
+    if isinstance(value, datetime):
+        return value.strftime("%d/%m/%Y")
     try:
         for fmt in ["%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d", "%d/%m/%Y %H:%M:%S", "%m/%d/%Y %H:%M:%S"]:
             try:
@@ -32,6 +34,8 @@ def filter_date_long(value):
     if not value or str(value).strip() == "":
         now = datetime.now()
         return f"tháng {now.month:02d} năm {now.year}"
+    if isinstance(value, datetime):
+        return f"ngày {value.day:02d} tháng {value.month:02d} năm {value.year}"
     try:
         for fmt in ["%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d", "%d/%m/%Y %H:%M:%S", "%m/%d/%Y %H:%M:%S"]:
             try:
@@ -231,4 +235,121 @@ def filter_num2text(value) -> str:
         return number_to_vietnamese_words(value)
     except Exception:
         return str(value)
+
+
+def _parse_to_datetime(value) -> datetime:
+    if not value or str(value).strip() == "":
+        return datetime.now()
+    if isinstance(value, datetime):
+        return value
+    if hasattr(value, "to_pydatetime"):
+        return value.to_pydatetime()
+    try:
+        for fmt in ["%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d", "%d/%m/%Y %H:%M:%S", "%m/%d/%Y %H:%M:%S"]:
+            try:
+                return datetime.strptime(str(value).strip(), fmt)
+            except ValueError:
+                continue
+        if isinstance(value, (int, float)):
+            from datetime import timedelta
+            base = datetime(1899, 12, 30)
+            return base + timedelta(days=float(value))
+    except Exception:
+        pass
+    raise ValueError(f"Cannot parse value as datetime: {value}")
+
+
+def filter_day(value) -> str:
+    try:
+        dt = _parse_to_datetime(value)
+        return f"{dt.day:02d}"
+    except Exception:
+        return ""
+
+
+def filter_month(value) -> str:
+    try:
+        dt = _parse_to_datetime(value)
+        return f"{dt.month:02d}"
+    except Exception:
+        return ""
+
+
+def filter_year(value) -> str:
+    try:
+        dt = _parse_to_datetime(value)
+        return f"{dt.year:04d}"
+    except Exception:
+        return ""
+
+
+def filter_add_days(value, days):
+    try:
+        dt = _parse_to_datetime(value)
+        from datetime import timedelta
+        return dt + timedelta(days=int(days))
+    except Exception:
+        return value
+
+
+def filter_add_months(value, months):
+    try:
+        dt = _parse_to_datetime(value)
+        m_to_add = int(months)
+        new_year = dt.year + (dt.month - 1 + m_to_add) // 12
+        new_month = (dt.month - 1 + m_to_add) % 12 + 1
+        import calendar
+        _, last_day = calendar.monthrange(new_year, new_month)
+        new_day = min(dt.day, last_day)
+        return dt.replace(year=new_year, month=new_month, day=new_day)
+    except Exception:
+        return value
+
+
+def filter_date_diff(value, other_value) -> int:
+    try:
+        dt1 = _parse_to_datetime(value)
+        dt2 = _parse_to_datetime(other_value)
+        return abs((dt1 - dt2).days)
+    except Exception:
+        return 0
+
+
+def filter_quarter(value) -> str:
+    try:
+        dt = _parse_to_datetime(value)
+        quarter_map = ["I", "II", "III", "IV"]
+        q = (dt.month - 1) // 3
+        return f"Quý {quarter_map[q]}/{dt.year}"
+    except Exception:
+        return ""
+
+
+def filter_weekday(value) -> str:
+    try:
+        dt = _parse_to_datetime(value)
+        weekday_map = {
+            0: "Thứ Hai",
+            1: "Thứ Ba",
+            2: "Thứ Tư",
+            3: "Thứ Năm",
+            4: "Thứ Sáu",
+            5: "Thứ Bảy",
+            6: "Chủ Nhật"
+        }
+        return weekday_map[dt.weekday()]
+    except Exception:
+        return ""
+
+
+def filter_date_text(value) -> str:
+    try:
+        dt = _parse_to_datetime(value)
+        day_str = number_to_vietnamese_words(dt.day).lower()
+        month_str = number_to_vietnamese_words(dt.month).lower()
+        year_str = number_to_vietnamese_words(dt.year).lower()
+        return f"Ngày {day_str} tháng {month_str} năm {year_str}"
+    except Exception:
+        return str(value)
+
 

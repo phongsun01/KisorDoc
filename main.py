@@ -409,6 +409,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
         context[clean_key] = str(raw_value)
 
     nested_context = make_nested_dict(context)
+    nested_context["now"] = datetime.now()
 
     xlsx_files = sorted(config.data_path.glob("*.xlsx"))
     danh_muc_file = next(
@@ -494,12 +495,26 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
             missing_placeholders = []
             try:
                 import jinja2
-                from filters import filter_date, filter_date_long, filter_number, filter_num2text
+                from filters import (
+                    filter_date, filter_date_long, filter_number, filter_num2text,
+                    filter_day, filter_month, filter_year, filter_add_days,
+                    filter_add_months, filter_date_diff, filter_quarter,
+                    filter_weekday, filter_date_text
+                )
                 jenv = jinja2.Environment()
                 jenv.filters["date"] = filter_date
                 jenv.filters["date_long"] = filter_date_long
                 jenv.filters["number"] = filter_number
                 jenv.filters["num2text"] = filter_num2text
+                jenv.filters["day"] = filter_day
+                jenv.filters["month"] = filter_month
+                jenv.filters["year"] = filter_year
+                jenv.filters["add_days"] = filter_add_days
+                jenv.filters["add_months"] = filter_add_months
+                jenv.filters["date_diff"] = filter_date_diff
+                jenv.filters["quarter"] = filter_quarter
+                jenv.filters["weekday"] = filter_weekday
+                jenv.filters["date_text"] = filter_date_text
 
                 doc = DocxTemplate(str(src_path))
                 undeclared = doc.get_undeclared_template_variables(jinja_env=jenv)

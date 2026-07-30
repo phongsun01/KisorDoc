@@ -173,6 +173,16 @@ Modifier được implement dưới dạng **custom Jinja2 filter** trong `docxt
 | `<<TenCongTy.Upper>>` | `{{TenCongTy\|upper}}` | Chữ hoa (Jinja2 built-in, không cần custom) | `CÔNG TY ABC` |
 | `<<GiaTri.Number>>` | `{{GiaTri\|number}}` | Dấu `.` nghìn, không thập phân | `1.500.000` |
 | `<<GiaTri.Chu>>` | `{{GiaTri\|num2text}}` | Chuyển đổi số sang dạng chữ tiếng Việt | `Một triệu năm trăm nghìn` |
+| | `{{Ngay\|day}}` | Chỉ lấy phần ngày (2 chữ số) | `30` |
+| | `{{Ngay\|month}}` | Chỉ lấy phần tháng (2 chữ số) | `07` |
+| | `{{Ngay\|year}}` | Chỉ lấy phần năm (4 chữ số) | `2026` |
+| | `{{Ngay\|add_days(5)}}` | Cộng thêm N ngày | `04/08/2026` |
+| | `{{Ngay\|add_months(2)}}` | Cộng thêm N tháng | `30/09/2026` |
+| | `{{Ngay1\|date_diff(Ngay2)}}` | Tính chênh lệch ngày giữa hai mốc thời gian | `15` |
+| | `{{Ngay\|quarter}}` | Lấy ký hiệu Quý trong năm (tiếng Việt) | `Quý III/2026` |
+| | `{{Ngay\|weekday}}` | Lấy tên thứ trong tuần (tiếng Việt) | `Thứ Năm` |
+| | `{{Ngay\|date_text}}` | Đọc toàn bộ ngày thành chữ tiếng Việt | `Ngày ba mươi tháng bảy năm hai nghìn không trăm hai mươi sáu` |
+| | `{{now}}` | Biến context toàn cục lấy ngày giờ hiện tại | *(datetime object)* |
 
 **Implementation:**
 ```python
