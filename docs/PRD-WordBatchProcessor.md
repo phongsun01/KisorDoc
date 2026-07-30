@@ -189,24 +189,29 @@ Modifier được implement dưới dạng **custom Jinja2 filter** trong `docxt
 from docxtpl import DocxTemplate
 import jinja2
 
-def filter_date(value):
-    # parse dd/MM/yyyy hoặc MM/dd/yyyy, fallback ngày hiện tại
-    ...
-
-def filter_date_long(value):
-    # "ngày DD tháng MM năm YYYY"
-    ...
-
-def filter_number(value):
-    # format 1.500.000, raise nếu không phải số
-    ...
+# Các hàm filter được đăng ký:
+# - filter_date, filter_date_long, filter_number, filter_num2text
+# - filter_day, filter_month, filter_year, filter_add_days
+# - filter_add_months, filter_date_diff, filter_quarter, filter_weekday, filter_date_text
 
 tpl = DocxTemplate("template.docx")
 jenv = jinja2.Environment()
-jenv.filters["date"]      = filter_date
-jenv.filters["date_long"] = filter_date_long
-jenv.filters["number"]    = filter_number
-# "upper" là built-in của Jinja2, không cần đăng ký
+jenv.filters["date"]       = filter_date
+jenv.filters["date_long"]  = filter_date_long
+jenv.filters["number"]     = filter_number
+jenv.filters["num2text"]   = filter_num2text
+jenv.filters["day"]        = filter_day
+jenv.filters["month"]      = filter_month
+jenv.filters["year"]       = filter_year
+jenv.filters["add_days"]   = filter_add_days
+jenv.filters["add_months"] = filter_add_months
+jenv.filters["date_diff"]  = filter_date_diff
+jenv.filters["quarter"]    = filter_quarter
+jenv.filters["weekday"]    = filter_weekday
+jenv.filters["date_text"]  = filter_date_text
+
+# Tự động chèn biến "now" vào context
+context["now"] = datetime.now()
 
 tpl.render(context, jenv)
 tpl.save("output.docx")
