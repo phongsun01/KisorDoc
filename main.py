@@ -48,63 +48,180 @@ def get_options() -> list[str]:
     return [f"{_str(r['Key'])}: {_str(r['Value'])}" for r in rows]
 
 
+def get_option_config(option_key: str) -> dict:
+    if not option_key:
+        return {}
+    opt_code = option_key.split(":")[0].strip() if ":" in option_key else option_key.strip()
+    try:
+        rows = ds.query("SELECT * FROM Options")
+    except Exception:
+        rows = []
+    for r in rows:
+        if _str(r.get("Key")) == opt_code:
+            return {
+                "sheet": _str(r.get("Sheet"), "GoiThau"),
+                "show": _str(r.get("Show"), "{TT}. {Số hiệu gói thầu} - {Tên gói thầu}"),
+                "key_id": _str(r.get("KeyId"), "GoiThau_ID"),
+            }
+    return {
+        "sheet": "GoiThau",
+        "show": "{TT}. {Số hiệu gói thầu} - {Tên gói thầu}",
+        "key_id": "GoiThau_ID",
+    }
+
+
+def safe_format(pattern: str, row: dict) -> str:
+    if not pattern:
+        return ""
+    import re
+    res = pattern
+    placeholders = re.findall(r"\{(.*?)\}", pattern)
+    for p in placeholders:
+        val = _str(row.get(p, ""))
+        res = res.replace(f"{{{p}}}", val)
+    return res
+
+
+def check_condition(condition_str: str, raw_row: dict, config_mappings: list[dict]) -> bool:
+    if not condition_str or condition_str.strip() == "" or condition_str.upper() == "ALL":
+        return True
+    
+    eval_context = {}
+    for mapping in config_mappings:
+        key = _str(mapping.get("Key"))
+        col = _str(mapping.get("Value"))
+        if key and col:
+            val = raw_row.get(col)
+            if val is not None:
+                import pandas as pd
+                try:
+                    is_na = pd.isna(val)
+                except (TypeError, ValueError):
+                    is_na = False
+                if is_na:
+                    val = None
+                
+                if isinstance(val, (int, float)):
+                    eval_context[key] = val
+                else:
+                    s_val = str(val).strip()
+                    s_clean = s_val.replace(".", "").replace(",", "")
+                    try:
+                        eval_context[key] = float(s_clean) if "." in s_clean else int(s_clean)
+                    except ValueError:
+                        eval_context[key] = s_val
+            else:
+                eval_context[key] = None
+    
+    try:
+        return bool(eval(condition_str, {}, eval_context))
+    except Exception as e:
+        print(f"⚠️  Lỗi cú pháp điều kiện lọc '{condition_str}': {e}")
+        return False
+
+
 def get_packages(option_key: str) -> list[str]:
-    goi_thau_rows = ds.query("SELECT * FROM GoiThau ORDER BY CAST(TT AS INTEGER)")
+    if not option_key:
+        return []
+    opt_config = get_option_config(option_key)
+    sheet = opt_config.get("sheet", "GoiThau")
+    show_format = opt_config.get("show", "")
+    
+    try:
+        rows = ds.query(f"SELECT * FROM {sheet} ORDER BY CAST(TT AS INTEGER)")
+    except Exception:
+        try:
+            rows = ds.query(f"SELECT * FROM {sheet}")
+        except Exception:
+            rows = []
+        
     packages = []
-    for r in goi_thau_rows:
-        label = f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}"
-        packages.append(label)
+    for r in rows:
+        label = safe_format(show_format, r)
+        if label:
+            packages.append(label)
     return packages
 
 
-def get_package_details(package_label: str) -> dict:
-    if not package_label:
+def get_package_details(option_key: str, package_label: str) -> dict:
+    if not option_key or not package_label:
         return {}
-    goi_thau_rows = ds.query("SELECT * FROM GoiThau")
-    for r in goi_thau_rows:
-        label = f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}"
+    opt_config = get_option_config(option_key)
+    sheet = opt_config.get("sheet", "GoiThau")
+    show_format = opt_config.get("show", "")
+    
+    try:
+        rows = ds.query(f"SELECT * FROM {sheet}")
+    except Exception:
+        rows = []
+        
+    for r in rows:
+        label = safe_format(show_format, r)
         if label == package_label:
-            return {
-                "Tên CĐT": _str(r.get("Chủ đầu tư", "")),
-                "Giá": _str(r.get("Giá gói thầu", "")),
-                "Loại": _str(r.get("GoiThau_Loai", "")),
-                "Số hiệu": _str(r.get("Số hiệu gói thầu", "")),
-            }
+            details = {}
+            for col_name, val in r.items():
+                if val is not None and str(val).strip() != "":
+                    details[col_name] = _str(val)
+            return details
     return {}
 
 
 def get_workflow_templates(option_key: str, package_label: str) -> list[dict]:
-    if not option_key:
+    if not option_key or not package_label or package_label.strip() == "":
         return []
-    opt = option_key.split(":")[0].strip() if ":" in option_key else option_key
-    if not package_label or package_label.strip() == "":
-        return []
-    ws_rows = ds.query("SELECT * FROM Workflow")
+    opt = option_key.split(":")[0].strip() if ":" in option_key else option_key.strip()
+    
+    try:
+        ws_rows = ds.query("SELECT * FROM Workflow")
+    except Exception:
+        ws_rows = []
     wf_rows = [r for r in ws_rows if _str(r.get("Option")) == opt]
     if not wf_rows:
         return []
-    goi_thau_rows = ds.query("SELECT * FROM GoiThau")
+        
+    opt_config = get_option_config(option_key)
+    sheet = opt_config.get("sheet", "GoiThau")
+    key_id = opt_config.get("key_id", "GoiThau_ID")
+    show_format = opt_config.get("show", "")
+    
+    try:
+        main_rows = ds.query(f"SELECT * FROM {sheet}")
+    except Exception:
+        main_rows = []
+        
     selected_pkg = None
-    for r in goi_thau_rows:
-        label = f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}"
+    for r in main_rows:
+        label = safe_format(show_format, r)
         if label == package_label:
             selected_pkg = r
             break
+            
     if not selected_pkg:
-        return wf_rows
-    price = _parse_price(selected_pkg.get("Giá gói thầu", 0))
-    goi_thau_loai = _str(selected_pkg.get("GoiThau_Loai"))
+        return []
+        
+    try:
+        config_mappings = ds.query("SELECT * FROM Config")
+    except Exception:
+        config_mappings = []
+        
     filtered = []
     for r in wf_rows:
-        pmin = _parse_price(r.get("Price", 0))
-        pmax = _parse_price(r.get("PriceMax", 0))
-        if pmin is not None and pmax is not None and price is not None:
-            if not (pmin <= price <= pmax):
+        condition_str = _str(r.get("Condition", ""))
+        if not condition_str:
+            price = _parse_price(selected_pkg.get("Giá gói thầu", 0))
+            goi_thau_loai = _str(selected_pkg.get("GoiThau_Loai"))
+            pmin = _parse_price(r.get("Price", 0))
+            pmax = _parse_price(r.get("PriceMax", 0))
+            if pmin is not None and pmax is not None and price is not None:
+                if not (pmin <= price <= pmax):
+                    continue
+            rtype = _str(r.get("Type"))
+            if rtype != "ALL" and rtype != goi_thau_loai:
                 continue
-        rtype = _str(r.get("Type"))
-        if rtype != "ALL" and rtype != goi_thau_loai:
-            continue
-        filtered.append(r)
+            filtered.append(r)
+        else:
+            if check_condition(condition_str, selected_pkg, config_mappings):
+                filtered.append(r)
     return filtered
 
 
@@ -152,13 +269,18 @@ def run_preview(option_key: str, package_label: str,
     opt = option_key.split(":")[0].strip() if ":" in option_key else option_key
 
     # --- Build context (copy từ run_batch) ---
-    goi_thau_rows = ds.query("SELECT * FROM GoiThau")
+    opt_config = get_option_config(option_key)
+    sheet = opt_config.get("sheet", "GoiThau")
+    key_id = opt_config.get("key_id", "GoiThau_ID")
+    show_format = opt_config.get("show", "")
+
+    goi_thau_rows = ds.query(f"SELECT * FROM {sheet}")
     selected_pkg = next((
         r for r in goi_thau_rows
-        if f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}" == package_label
+        if safe_format(show_format, r) == package_label
     ), None)
     if not selected_pkg:
-        return "❌ Không tìm thấy gói thầu"
+        return "❌ Không tìm thấy dòng dữ liệu tương ứng"
 
     config_rows = ds.query("SELECT * FROM Config")
     context_keys: set[str] = set()
@@ -204,7 +326,7 @@ def run_preview(option_key: str, package_label: str,
     except Exception:
         tables_rows = []
 
-    goi_thau_id = _str(selected_pkg.get("GoiThau_ID"))
+    goi_thau_id = _str(selected_pkg.get(key_id))
 
     # Tìm các dòng Tables liên quan đến template đang chọn
     xlsx_files = sorted(config.data_path.glob("*.xlsx"))
@@ -223,7 +345,8 @@ def run_preview(option_key: str, package_label: str,
 
     table_lines = []
     for t in tables_rows:
-        if _str(t.get("GoiThau_ID")) != goi_thau_id:
+        t_id = t.get(key_id) if key_id in t else t.get("GoiThau_ID")
+        if _str(t_id) != goi_thau_id:
             continue
         name     = _str(t.get("Name", ""))
         sheet    = _str(t.get("Sheet", ""))
@@ -353,21 +476,26 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
         yield "", "⚠️ Vui lòng chọn ít nhất 1 template", None
         return
 
-    opt = option_key.split(":")[0].strip() if ":" in option_key else option_key
+    opt = option_key.split(":")[0].strip() if ":" in option_key else option_key.strip()
 
-    goi_thau_rows = ds.query("SELECT * FROM GoiThau")
+    opt_config = get_option_config(option_key)
+    sheet = opt_config.get("sheet", "GoiThau")
+    key_id = opt_config.get("key_id", "GoiThau_ID")
+    show_format = opt_config.get("show", "")
+
+    goi_thau_rows = ds.query(f"SELECT * FROM {sheet}")
     selected_pkg = None
     for r in goi_thau_rows:
-        label = f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}"
+        label = safe_format(show_format, r)
         if label == package_label:
             selected_pkg = r
             break
 
     if not selected_pkg:
-        yield "", "❌ Không tìm thấy gói thầu đã chọn", None
+        yield "", "❌ Không tìm thấy dòng dữ liệu tương ứng", None
         return
 
-    goi_thau_id = _str(selected_pkg.get("GoiThau_ID"))
+    goi_thau_id = _str(selected_pkg.get(key_id))
     config_rows = ds.query("SELECT * FROM Config")
 
     try:
@@ -484,7 +612,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
     table_placeholder_names = {
         _str(t.get("Name", "")).strip("{} ")
         for t in tables_rows
-        if _str(t.get("GoiThau_ID")) == goi_thau_id
+        if _str(t.get(key_id) if key_id in t else t.get("GoiThau_ID")) == goi_thau_id
     }
 
     for i, (src_path, tpl_name) in enumerate(zip(copied, template_names)):
@@ -538,7 +666,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
 
             if danh_muc_file and danh_muc_file.exists():
                 try:
-                    copy_tables_for_file(src_path, config, goi_thau_id, tables_rows, danh_muc_file)
+                    copy_tables_for_file(src_path, config, goi_thau_id, tables_rows, danh_muc_file, key_id)
                 except PermissionError as table_err:
                     if "being used by another process" in str(table_err) or getattr(table_err, 'errno', None) == errno.EACCES:
                         raise PermissionError(table_err) from table_err
@@ -618,12 +746,7 @@ def create_ui():
                         gr.Markdown("### Chọn quy trình & Gói thầu")
                         options = get_options()
                         option_radio = gr.Radio(choices=options, label="Chọn quy trình")
-
-                        goi_thau_rows = ds.query("SELECT * FROM GoiThau ORDER BY CAST(TT AS INTEGER)")
-                        packages = []
-                        for r in goi_thau_rows:
-                            packages.append(f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}")
-                        package_radio = gr.Radio(choices=packages, label="Chọn gói thầu")
+                        package_radio = gr.Radio(choices=[], label="Chọn gói thầu/Dữ liệu")
 
                         with gr.Group():
                             gr.Markdown("**Preview thông tin gói thầu:**")
@@ -665,14 +788,14 @@ def create_ui():
                     retry_btn = gr.Button("🔄 Chạy lại file lỗi", variant="stop", visible=False)
 
         def on_package_change(pkg):
-            details = get_package_details(pkg)
+            opt = _sel["opt"]
+            details = get_package_details(opt, pkg)
             if not details:
                 preview_text = ""
             else:
                 lines = [f"{k}: {v}" for k, v in details.items() if v]
                 preview_text = "\n".join(lines)
 
-            opt = _sel["opt"]
             if not opt or not pkg:
                 return preview_text, gr.update(choices=[], value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)"), None, gr.update(visible=False), gr.update(visible=False)
 
@@ -691,8 +814,9 @@ def create_ui():
 
         def on_option_change(opt):
             _sel["opt"] = opt or ""
+            pkgs = get_packages(opt)
             return (
-                gr.update(value=None),
+                gr.update(choices=pkgs, value=None),
                 gr.update(choices=[], value=[]),
                 gr.update(value="**Chọn template cần xử lý** (0 file)"),
                 "",
@@ -838,13 +962,9 @@ def create_ui():
             _sel["opt"] = ""
             _sel["pkg"] = ""
             initial_options = get_options()
-            initial_packages = []
-            for r in ds.query("SELECT * FROM GoiThau ORDER BY CAST(TT AS INTEGER)"):
-                initial_packages.append(f"{_str(r.get('TT'))}. {_str(r.get('Số hiệu gói thầu'))} - {_str(r.get('Tên gói thầu'))}")
-
             return (
                 gr.update(choices=initial_options, value=None),
-                gr.update(choices=initial_packages, value=None),
+                gr.update(choices=[], value=None),
                 gr.update(value=[]),
                 gr.update(value=""),
                 gr.update(visible=False),
