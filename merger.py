@@ -2,7 +2,7 @@ import jinja2
 from docxtpl import DocxTemplate
 from pathlib import Path
 
-from filters import filter_date, filter_date_long, filter_number
+from filters import filter_date, filter_date_long, filter_number, filter_num2text
 
 def mail_merge(template_path: Path, context: dict, output_path: Path):
     # Load template using docxtpl
@@ -13,6 +13,7 @@ def mail_merge(template_path: Path, context: dict, output_path: Path):
     jenv.filters["date"] = filter_date
     jenv.filters["date_long"] = filter_date_long
     jenv.filters["number"] = filter_number
+    jenv.filters["num2text"] = filter_num2text
     
     # Render template
     doc.render(context, jenv)
@@ -34,6 +35,7 @@ def mail_merge_safe(template_path, context: dict, output_path) -> tuple[bool, st
         jenv.filters["date"]      = filter_date
         jenv.filters["date_long"] = filter_date_long
         jenv.filters["number"]    = filter_number
+        jenv.filters["num2text"]  = filter_num2text
         doc.render(context, jenv)
         doc.save(str(tmp))
         shutil.move(str(tmp), str(output_path))

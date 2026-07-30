@@ -172,6 +172,7 @@ Modifier được implement dưới dạng **custom Jinja2 filter** trong `docxt
 | `<<NgayKy.Date.Long>>` | `{{NgayKy\|date_long}}` | Ngày tiếng Việt. Rỗng → tháng/năm hiện tại | `ngày 01 tháng 07 năm 2026` |
 | `<<TenCongTy.Upper>>` | `{{TenCongTy\|upper}}` | Chữ hoa (Jinja2 built-in, không cần custom) | `CÔNG TY ABC` |
 | `<<GiaTri.Number>>` | `{{GiaTri\|number}}` | Dấu `.` nghìn, không thập phân | `1.500.000` |
+| `<<GiaTri.Chu>>` | `{{GiaTri\|num2text}}` | Chuyển đổi số sang dạng chữ tiếng Việt | `Một triệu năm trăm nghìn` |
 
 **Implementation:**
 ```python

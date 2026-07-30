@@ -494,11 +494,12 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
             missing_placeholders = []
             try:
                 import jinja2
-                from filters import filter_date, filter_date_long, filter_number
+                from filters import filter_date, filter_date_long, filter_number, filter_num2text
                 jenv = jinja2.Environment()
                 jenv.filters["date"] = filter_date
                 jenv.filters["date_long"] = filter_date_long
                 jenv.filters["number"] = filter_number
+                jenv.filters["num2text"] = filter_num2text
 
                 doc = DocxTemplate(str(src_path))
                 undeclared = doc.get_undeclared_template_variables(jinja_env=jenv)

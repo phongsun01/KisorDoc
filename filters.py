@@ -122,3 +122,113 @@ def filter_number(value):
         return f"{int(round(num)):,}".replace(",", ".")
     except (ValueError, TypeError):
         raise ValueError(f"Cannot format as number: {value}")
+
+
+def number_to_vietnamese_words(value) -> str:
+    if value is None:
+        return "Không"
+    
+    if isinstance(value, (int, float)):
+        import math
+        if math.isnan(value):
+            return "Không"
+        val_int = int(round(value))
+    else:
+        s = str(value).strip()
+        if not s:
+            return "Không"
+        try:
+            clean_s = filter_number(s)
+            clean_s = clean_s.replace(".", "")
+            val_int = int(clean_s)
+        except Exception:
+            clean_digits = "".join(c for c in s if c.isdigit() or c == "-")
+            if not clean_digits or clean_digits == "-":
+                return str(value)
+            try:
+                val_int = int(clean_digits)
+            except Exception:
+                return str(value)
+
+    if val_int == 0:
+        return "Không"
+
+    is_negative = val_int < 0
+    val_str = str(abs(val_int))
+
+    pad_len = (3 - len(val_str) % 3) % 3
+    val_str = "0" * pad_len + val_str
+
+    groups = [val_str[i:i+3] for i in range(0, len(val_str), 3)]
+    num_groups = len(groups)
+
+    units_words = ["", " nghìn", " triệu", " tỷ"]
+    units = []
+    for idx in range(num_groups):
+        unit_idx = idx % 4
+        super_idx = idx // 4
+        unit_str = units_words[unit_idx]
+        if super_idx > 0 and unit_idx == 0:
+            unit_str = " tỷ" * (super_idx + 1)
+        elif super_idx > 0:
+            unit_str = unit_str + " tỷ" * super_idx
+        units.append(unit_str)
+    units = units[::-1]
+
+    digits_map = ["không", "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tám", "chín"]
+
+    def read_three_digits(grp, is_first_group):
+        h, t, u = int(grp[0]), int(grp[1]), int(grp[2])
+        if h == 0 and t == 0 and u == 0:
+            return ""
+
+        words = []
+        if not is_first_group or h > 0:
+            words.append(digits_map[h] + " trăm")
+
+        if t == 0:
+            if u > 0 and (not is_first_group or h > 0):
+                words.append("lẻ")
+        elif t == 1:
+            words.append("mười")
+        else:
+            words.append(digits_map[t] + " mươi")
+
+        if u > 0:
+            if u == 1 and t > 1:
+                words.append("mốt")
+            elif u == 5 and t > 0:
+                words.append("lăm")
+            elif u == 4 and t > 1:
+                words.append("tư")
+            else:
+                words.append(digits_map[u])
+
+        return " ".join(words)
+
+    group_words = []
+    for idx, grp in enumerate(groups):
+        grp_word = read_three_digits(grp, idx == 0)
+        if grp_word:
+            unit = units[idx]
+            group_words.append(grp_word + unit)
+
+    result = " ".join(group_words).strip()
+    
+    if result:
+        result = result[0].upper() + result[1:]
+
+    if is_negative:
+        if result:
+            result = result[0].lower() + result[1:]
+        result = "Âm " + result
+
+    return result
+
+
+def filter_num2text(value) -> str:
+    try:
+        return number_to_vietnamese_words(value)
+    except Exception:
+        return str(value)
+
