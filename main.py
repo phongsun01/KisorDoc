@@ -86,37 +86,59 @@ def check_condition(condition_str: str, raw_row: dict, config_mappings: list[dic
     if not condition_str or condition_str.strip() == "" or condition_str.upper() == "ALL":
         return True
     
-    eval_context = {}
+    import re
+    placeholders = re.findall(r"\{(.*?)\}", condition_str)
+    
+    key_to_col = {}
     for mapping in config_mappings:
-        key = _str(mapping.get("Key"))
-        col = _str(mapping.get("Value"))
-        if key and col:
-            val = raw_row.get(col)
-            if val is not None:
-                import pandas as pd
-                try:
-                    is_na = pd.isna(val)
-                except (TypeError, ValueError):
-                    is_na = False
-                if is_na:
-                    val = None
-                
+        k = _str(mapping.get("Key")).strip("<>{}| ")
+        for suffix in (".Date.Long", ".Date", ".Upper", ".Number"):
+            if k.endswith(suffix):
+                k = k[:-len(suffix)]
+                break
+        if "|" in k:
+            k = k.split("|")[0].strip()
+            
+        c = _str(mapping.get("Value"))
+        if k and c:
+            key_to_col[k] = c
+
+    eval_context = {}
+    patched_condition = condition_str
+    
+    for idx, p in enumerate(placeholders):
+        p_clean = p.strip()
+        safe_var = f"var_{idx}"
+        
+        col_name = key_to_col.get(p_clean, p_clean)
+        val = raw_row.get(col_name)
+        
+        parsed_val = None
+        if val is not None:
+            import pandas as pd
+            try:
+                is_na = pd.isna(val)
+            except (TypeError, ValueError):
+                is_na = False
+            
+            if not is_na:
                 if isinstance(val, (int, float)):
-                    eval_context[key] = val
+                    parsed_val = val
                 else:
                     s_val = str(val).strip()
                     s_clean = s_val.replace(".", "").replace(",", "")
                     try:
-                        eval_context[key] = float(s_clean) if "." in s_clean else int(s_clean)
+                        parsed_val = float(s_clean) if "." in s_clean else int(s_clean)
                     except ValueError:
-                        eval_context[key] = s_val
-            else:
-                eval_context[key] = None
-    
+                        parsed_val = s_val
+        
+        eval_context[safe_var] = parsed_val
+        patched_condition = patched_condition.replace(f"{{{p}}}", safe_var)
+
     try:
-        return bool(eval(condition_str, {}, eval_context))
+        return bool(eval(patched_condition, {}, eval_context))
     except Exception as e:
-        print(f"⚠️  Lỗi cú pháp điều kiện lọc '{condition_str}': {e}")
+        print(f"⚠️  Lỗi cú pháp điều kiện lọc '{condition_str}' (biểu thức sau chuyển đổi: '{patched_condition}'): {e}")
         return False
 
 
