@@ -3,19 +3,27 @@
 Công cụ Python xử lý hàng loạt tài liệu Word (Mail Merge & Copy bảng từ Excel sang Word), được xây dựng để thay thế hoàn toàn bot UiPath cũ.
 
 ## Tính năng chính
-
+ 
 1. **Mail Trộn thư (Mail Merge):**
    - Hỗ trợ trộn dữ liệu từ Excel vào Word qua template định dạng Jinja2 `{{ TenBien }}`.
-   - Hỗ trợ các bộ lọc định dạng: `|date` (dd/MM/yyyy), `|date_long` (ngày... tháng... năm...), `|number` (định dạng số phân tách hàng nghìn), `|upper` (chữ in hoa).
-   - Tự động phân tách và xử lý các biến văn bản độc lập với biến ngày tháng cùng tiền tố (Ví dụ: `KHLCNT_TTr` và `KHLCNT_TTr_Date`).
+   - Hỗ trợ các bộ lọc định dạng: `|date` (dd/MM/yyyy), `|date_long` (ngày... tháng... năm...), `|number` (định dạng số phân tách hàng nghìn), `|upper` (chữ in hoa), `|num2text` (đọc số thành chữ).
+   - Tự động phân tách và xử lý các biến văn bản độc lập với biến ngày tháng cùng tiền tố (Ví dụ: `KHLCNT_QD` và `KHLCNT_QD_Date`).
    - Tự động phân tích các biến lồng nhau dạng dấu chấm (Ví dụ: `{{KHLCNT_TTr.Dvi}}`, `{{DuToan.NguoiLap}}`).
+   - **Phân vùng Config theo Option:** Giới hạn phạm vi đọc cấu hình mapping dòng (Ví dụ: `2-97`) cho từng Option để tránh trùng lặp placeholder chéo.
 
 2. **Copy bảng Excel sang Word:**
-   - Sao chép một vùng dữ liệu (Range) từ Excel và chèn vào vị trí placeholder `{{DanhMuc}}` hoặc `{{DanhMucKoGia}}` dưới dạng bảng Word thật.
+   - Sao chép vùng dữ liệu (Range) từ Excel và chèn vào vị trí placeholder `{{DanhMuc}}` dạng bảng Word thật.
    - Giữ nguyên định dạng gốc: gộp ô (merged cells), màu nền, viền bảng, chiều cao/chiều rộng và căn lề.
-   - Tự động chuẩn hóa từ các ký hiệu ngoặc đơn `{}` hoặc không ngoặc trong Excel.
+   - **Nguồn file Excel động:** Cấu hình cột `File` trong sheet `Tables` để đọc trực tiếp từ nhiều file Excel khác nhau (Ví dụ: `S.Oto.xlsx`).
+   - **Nhân bản bảng tự động:** Sao chép bảng dữ liệu cuối cùng khi số placeholder trong Word lớn hơn số dòng khai báo trong Excel.
 
-3. **Giao diện Web Local (Gradio):**
+3. **Liên kết bảng thông minh (Join Sheets):**
+   - Hỗ trợ liên kết 2 bảng qua ký hiệu rút gọn (Ví dụ: `GoiThau <* TCGTTD @ GoiThau_ID` tương đương LEFT JOIN).
+   - Hỗ trợ liên kết từ 3 bảng trở lên qua câu lệnh truy vấn SQL trực tiếp (`SELECT ...`).
+   - **Gộp sheet trùng tên:** Tự động gộp dữ liệu từ nhiều file Excel khi phát hiện sheet trùng tên trong DataSet.
+   - **Cảnh báo trùng tên cột:** Hiển thị cảnh báo trực quan trên log UI khi phát hiện các cột trùng tên giữa các bảng được join.
+
+4. **Giao diện Web Local (Gradio):**
    - Thao tác trực quan qua 3 bước: Chọn Gói thầu -> Chọn template -> Chạy & Xem log.
 
 ## Cấu trúc thư mục

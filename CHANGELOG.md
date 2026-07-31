@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.1.0] - 2026-07-31
+
+### Added
+- **Liên kết bảng (Join Sheets):** Hỗ trợ liên kết 2 bảng bằng ký hiệu rút gọn (`<*`, `*>`, `*`, `<*>`) và trên 3 bảng bằng câu lệnh SQL trực tiếp (`SELECT ...`).
+- **Gộp sheet trùng tên tự động:** Tự động gộp dòng dữ liệu từ các file Excel khác nhau khi phát hiện có sheet trùng tên (Ví dụ: `Tables` trong `Tables.xlsx` và `DanhMuc-MSSC.xlsx`).
+- **Nguồn file Excel động cho Tables:** Thêm cột `File` trong sheet `Tables` để tùy biến file nguồn copy bảng (Ví dụ: `S.Oto.xlsx`).
+- **Nhân bản bảng biểu tự động:** Tự động copy lặp lại bảng dữ liệu cuối cùng khi số placeholder trong Word nhiều hơn dòng cấu hình Excel.
+- **Cảnh báo trùng tên cột (Column Collision Warning):** Hiển thị cảnh báo trực quan trên log UI khi các cột bị trùng tên trong quá trình Join.
+
+### Fixed
+- Khắc phục lỗi so khớp tên file chứa số thập phân (Ví dụ: `9.1 BC tham dinh ...`) khi chèn bảng biểu.
+- Sửa lỗi gộp ô (merge cell) khi remap chỉ số dòng master row bị sai tọa độ trong `table_copier.py`.
+- Khắc phục lỗi crash validation của Gradio (`choices=[]`) khi chuyển đổi quy trình hoặc gói thầu trên UI.
+- Tối ưu hóa bỏ qua các file `S.*` lúc khởi động giúp tiết kiệm 90% dung lượng RAM và tăng tốc app.
+
 ## [2.0.1] - 2026-07-31
 
 ### Fixed

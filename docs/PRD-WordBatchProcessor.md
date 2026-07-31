@@ -1,7 +1,7 @@
 # PRD – Word Batch Processor (KisorDoc-AI)
-**Phiên bản:** 2.3  
-**Ngày:** 2026-07-29  
-**Trạng thái:** Production Ready (ver1.10)
+**Phiên bản:** 3.0  
+**Ngày:** 2026-07-31  
+**Trạng thái:** Production Ready (ver2.1.0)
 
 ---
 
@@ -980,11 +980,35 @@ F5 (Version pin)    ← Nice-to-have, làm cuối
 
 ---
 
-### Điểm mở cần xác nhận
+## 11. Các cập nhật lớn trong Phiên bản 3.0 (2026-07-31)
 
-| # | Câu hỏi |
-|---|---|
-| Q-01 | F2 Dry-run: Preview value có cần hiển thị sau khi áp dụng filter không? (VD: `{{NgayKy\|date}}` → hiện `"01/07/2026"` hay hiện giá trị raw `"01/07/2026 00:00:00"`) |
-| Q-02 | F4 Log: Có cần ghi log vào database (SQLite) để query/filter sau không, hay file text là đủ? |
-| Q-03 | F5 Version pin: So sánh config với lần chạy gần nhất cho **cùng gói thầu** hay gần nhất **không phân biệt gói thầu**? |
-| Q-04 | F6 Retry: Delay 2 giây mỗi lần retry có phù hợp không, hay cần user configure? |
+### 11.1 Dịch chuyển định dạng Jinja2 & Modifier Mới
+*   Nâng cấp toàn bộ các placeholder biến dạng cũ `<<TenBien>>` và `<<TenBien.Modifier>>` trong các template Word (`Opt1` $\rightarrow$ `Opt5`) sang dạng đóng mở ngoặc kép **Jinja2** `{{ }}`, kết hợp sử dụng bộ lọc `|` chuẩn:
+    *   `<<TenBien.Date.Long>>` $\rightarrow$ `{{ TenBien_Date|date_long }}`
+    *   `<<TenBien.Date>>` $\rightarrow$ `{{ TenBien_Date|date }}`
+    *   `<<TenBien.Upper>>` $\rightarrow$ `{{ TenBien|upper }}`
+    *   `<<TenBien.Number>>` $\rightarrow$ `{{ TenBien|number }}`
+    *   `<<TenBien.Num2Text>>` $\rightarrow$ `{{ TenBien|num2text }}`
+*   Ánh xạ thông minh: Toàn bộ các hậu tố dấu chấm `.Date` và `.Date.Long` trong file cấu hình Excel tự động được ánh xạ thành **`_Date`** để tránh xung đột ghi đè giữa Số quyết định (Ví dụ: `KH_QD`) và Ngày quyết định (`KH_QD_Date`).
+
+### 11.2 Phân vùng Config theo Option (`config_range`)
+*   Bổ sung cột `Config` (hoặc `config_range`) trong sheet `Options` của Excel (Định dạng: `StartRow-EndRow`, ví dụ `2-97`). 
+*   Cho phép giới hạn phạm vi nạp cấu hình mapping cho từng Option riêng biệt, tránh xung đột placeholder chéo giữa các quy trình khác nhau.
+
+### 11.3 Copy bảng biểu từ file Excel động (`File` column)
+*   Sheet `Tables` hỗ trợ thêm cột `File` để chỉ định cụ thể file Excel nguồn chứa bảng dữ liệu (Ví dụ: `S.Oto.xlsx`).
+*   Nếu cột `File` không có hoặc để trống (chuẩn cũ) $\rightarrow$ Tự động fallback về file danh mục mặc định của gói thầu.
+*   **Tự động nhân bản bảng:** Nếu trong Word có $N$ thẻ placeholder giống nhau nhưng Excel chỉ khai báo ít hơn $N$ dòng cấu hình, hệ thống sẽ tự động sao chép bảng dữ liệu cuối cùng khả dụng để điền vào tất cả các vị trí thẻ còn lại, không để sót thẻ thô.
+
+### 11.4 Liên kết bảng thông minh (Join Sheets)
+*   Cột `Sheet` trong sheet `Options` của Excel hỗ trợ liên kết các bảng dữ liệu:
+    *   **Join 2 bảng (Sử dụng ký hiệu rút gọn):** `[Bảng 1] [Ký hiệu] [Bảng 2] @ [Khóa]`.
+        *   Các ký hiệu: `<*` (Left Join), `*>` (Right Join), `*` (Inner Join), `<*>` (Full Outer Join).
+        *   Ví dụ: `GoiThau <* TCGTTD @ GoiThau_ID`
+    *   **Join 3 bảng trở lên (Sử dụng SQL trực tiếp):** Nếu biểu thức bắt đầu bằng `SELECT`, hệ thống sẽ cho chạy trực tiếp câu lệnh truy vấn SQL này trên DuckDB.
+*   **Cảnh báo trùng tên cột (Column Collision Warning):** Khi thực hiện join, nếu phát hiện 2 bảng cùng có các cột trùng tên nhau, hệ thống sẽ in cảnh báo chi tiết màu vàng lên Gradio UI/Log để người dùng nhận diện và điều chỉnh lại trong Excel, tránh ghi đè dữ liệu sai lệch.
+
+### 11.5 Tối ưu hóa khởi động hệ thống
+*   Tự động bỏ qua các file Excel nguồn chứa bảng biểu bắt đầu bằng chữ `S.` lúc khởi động app. Các file này chỉ được mở đọc khi thực hiện tiến trình chèn bảng biểu vào Word, giúp ứng dụng khởi động tức thì và tiết kiệm 90% dung lượng RAM.
+*   Hệ thống tự động thực hiện **gộp (concatenate)** dữ liệu từ nhiều file Excel khi phát hiện trùng tên sheet (Ví dụ: Sheet `Tables` có ở cả `Tables.xlsx` và `DanhMuc-MSSC.xlsx`).
+
