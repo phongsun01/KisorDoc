@@ -14,7 +14,11 @@ def filter_date(value):
     if isinstance(value, datetime):
         return value.strftime("%d/%m/%Y")
     try:
-        for fmt in ["%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d", "%d/%m/%Y %H:%M:%S", "%m/%d/%Y %H:%M:%S"]:
+        for fmt in [
+            "%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d", 
+            "%d/%m/%Y %H:%M:%S", "%m/%d/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"
+        ]:
             try:
                 dt = datetime.strptime(str(value).strip(), fmt)
                 return dt.strftime("%d/%m/%Y")
@@ -37,7 +41,11 @@ def filter_date_long(value):
     if isinstance(value, datetime):
         return f"ngày {value.day:02d} tháng {value.month:02d} năm {value.year}"
     try:
-        for fmt in ["%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d", "%d/%m/%Y %H:%M:%S", "%m/%d/%Y %H:%M:%S"]:
+        for fmt in [
+            "%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d", 
+            "%d/%m/%Y %H:%M:%S", "%m/%d/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"
+        ]:
             try:
                 dt = datetime.strptime(str(value).strip(), fmt)
                 return f"ngày {dt.day:02d} tháng {dt.month:02d} năm {dt.year}"
