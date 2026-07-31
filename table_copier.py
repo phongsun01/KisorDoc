@@ -87,7 +87,17 @@ def copy_tables_for_file(
             if not sheet:
                 continue
 
-            ws_data = _read_excel_range(xlsx_path, sheet, range_spec, hide_cols)
+            # Tự động phát hiện cột 'File' (chuẩn mới tables-2) và fallback về xlsx_path (chuẩn cũ)
+            source_file = xlsx_path
+            file_val = str(occ.get("File", "")).strip()
+            if file_val and file_val.lower() != "none" and file_val != "":
+                resolved_file = xlsx_path.parent / file_val
+                if resolved_file.exists():
+                    source_file = resolved_file
+                else:
+                    print(f"⚠️  Không tìm thấy file nguồn cấu hình: {file_val}, sử dụng mặc định: {xlsx_path.name}")
+
+            ws_data = _read_excel_range(source_file, sheet, range_spec, hide_cols)
             if ws_data is None:
                 continue
 
