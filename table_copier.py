@@ -35,7 +35,7 @@ def copy_tables_for_file(
     goi_thau_id: str,
     tables_data: list[dict],
     xlsx_path: Path,
-    key_id: str = "GoiThau_ID"
+    key_id: str = "ID"
 ):
     doc = Document(str(doc_path))
 
@@ -45,7 +45,7 @@ def copy_tables_for_file(
 
     matching_tables = [
         t for t in tables_data
-        if str(t.get(key_id) if key_id in t else t.get("GoiThau_ID", "")).strip() == goi_thau_id
+        if str(t.get(key_id) if key_id in t else t.get("ID", "")).strip() == goi_thau_id
         and _match_word(str(t.get("Word", "")), file_stem)
     ]
     if not matching_tables:

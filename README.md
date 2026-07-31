@@ -26,6 +26,11 @@ Công cụ Python xử lý hàng loạt tài liệu Word (Mail Merge & Copy bả
 4. **Giao diện Web Local (Gradio):**
    - Thao tác trực quan qua 3 bước: Chọn Gói thầu -> Chọn template -> Chạy & Xem log.
 
+5. **Quy trình chạy lặp hàng loạt (Repeat Mode):**
+   - Hỗ trợ chạy hàng loạt nhiều dòng dữ liệu cho 1 file template thông qua bộ nhận diện `Type` = `Repeat` trong sheet `Options` (Ví dụ: xuất cam kết cho từng thành viên của Tổ chuyên gia/Tổ thẩm định).
+   - Tự động hiển thị bộ chọn nhóm (Tổ chuyên gia/Tổ thẩm định) và load danh sách thành viên động từ sheet `S.TCGTTD` của gói thầu đang chọn lên checkbox.
+   - Liên kết động thông tin cá nhân chi tiết bằng Họ tên và gán ID liên kết trước khi thực hiện phép Join để sinh dữ liệu.
+
 ## Cấu trúc thư mục
 
 ```text

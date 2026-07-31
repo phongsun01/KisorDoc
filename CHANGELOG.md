@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.2.0] - 2026-07-31
+
+### Added
+- **Quy trình Lặp (Repeat Type Options):** Hỗ trợ chạy hàng loạt nhiều dòng dữ liệu cho 1 file template thông qua bộ nhận diện `Type` = `Repeat` trong sheet `Options` (Ví dụ: xuất cam kết cho từng thành viên của Tổ chuyên gia/Tổ thẩm định).
+- **Bộ chọn nhóm & thành viên động:** Tích hợp radio chọn nhóm ("Tổ chuyên gia" / "Tổ thẩm định") và load danh sách thành viên động từ sheet `S.TCGTTD` của gói thầu lên checkbox để người dùng chọn người cần xuất tài liệu.
+- **Liên kết động bằng Họ tên:** Tự động kết nối dữ liệu chi tiết của thành viên trong sheet `S.TCGTTD` của gói thầu với bảng dữ liệu dùng chung `TCGTTD` bằng so khớp Họ tên, sau đó gán `GoiThau_ID` động để thực hiện phép Join của hệ thống.
+
+### Changed
+- **Sửa giá trị khóa mặc định:** Thay đổi giá trị fallback mặc định của `key_id` từ `"GoiThau_ID"` thành `"ID"` giúp hệ thống linh hoạt hơn khi cấu hình.
+
 ## [2.1.0] - 2026-07-31
 
 ### Added

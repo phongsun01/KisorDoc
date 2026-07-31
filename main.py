@@ -96,14 +96,16 @@ def get_option_config(option_key: str) -> dict:
             return {
                 "sheet": _str(r.get("Sheet"), "GoiThau"),
                 "show": _str(r.get("Show"), "{TT}. {Số hiệu gói thầu} - {Tên gói thầu}"),
-                "key_id": _str(r.get("KeyId"), "GoiThau_ID"),
+                "key_id": _str(r.get("KeyId"), "ID"),
                 "config_range": _str(r.get("Config"), ""),
+                "type": _str(r.get("Type"), ""),
             }
     return {
         "sheet": "GoiThau",
         "show": "{TT}. {Số hiệu gói thầu} - {Tên gói thầu}",
-        "key_id": "GoiThau_ID",
+        "key_id": "ID",
         "config_range": "",
+        "type": "",
     }
 
 
@@ -277,6 +279,160 @@ def resolve_sheet_query(sheet_name: str) -> str:
     return f'SELECT * FROM "{s}"'
 
 
+def get_package_excel_file(goi_thau_id: str) -> Path | None:
+    try:
+        rows = ds.query(f"SELECT DISTINCT File FROM Tables WHERE GoiThau_ID = '{goi_thau_id}' AND File IS NOT NULL AND File != 'nan'")
+        if rows:
+            filename = str(rows[0]['File']).strip()
+            filepath = config.data_path / filename
+            if filepath.exists():
+                return filepath
+    except Exception as e:
+        print(f"⚠️ Error finding package excel file: {e}")
+    for f in config.data_path.glob("*.xlsx"):
+        if goi_thau_id in f.name:
+            return f
+    return None
+
+
+def get_repeat_members(goi_thau_id: str, group_type: str) -> list[str]:
+    excel_path = get_package_excel_file(goi_thau_id)
+    if not excel_path:
+        print(f"⚠️ Could not find excel path for package: {goi_thau_id}")
+        return []
+    
+    import openpyxl
+    try:
+        wb = openpyxl.load_workbook(excel_path, read_only=True, data_only=True)
+        if 'S.TCGTTD' not in wb.sheetnames:
+            wb.close()
+            return []
+        ws = wb['S.TCGTTD']
+        members = []
+        current_group = None
+        headers = []
+        
+        target_group = "TCG" if "chuyên gia" in group_type.lower() else "TTD"
+        
+        for row in ws.iter_rows(values_only=True):
+            row_str = [str(c).strip() if c is not None else "" for c in row]
+            if not any(row_str):
+                continue
+            row_joined = " ".join(row_str).upper()
+            if "TỔ CHUYÊN GIA" in row_joined:
+                current_group = "TCG"
+                headers = []
+                continue
+            elif "TỔ THẨM ĐỊNH" in row_joined:
+                current_group = "TTD"
+                headers = []
+                continue
+                
+            if current_group == target_group:
+                if "TT" in row_str or "Tên thành viên" in row_str or "Họ và tên" in row_str:
+                    headers = row_str
+                    continue
+                if headers:
+                    name = row_str[1] if len(row_str) > 1 else ""
+                    if name and name.replace(".", "").strip() not in ("", "Tên thành viên", "Họ và tên"):
+                        members.append(name.strip())
+        wb.close()
+        return members
+    except Exception as e:
+        print(f"❌ Error reading members: {e}")
+        return []
+
+
+def register_temporary_tcgttd(goi_thau_id: str, selected_member_names: list[str], group_name: str, key_id: str) -> bool:
+    excel_path = get_package_excel_file(goi_thau_id)
+    if not excel_path:
+        print(f"⚠️ Could not find excel path for package: {goi_thau_id}")
+        return False
+        
+    import openpyxl
+    try:
+        wb = openpyxl.load_workbook(excel_path, read_only=True, data_only=True)
+        if 'S.TCGTTD' not in wb.sheetnames:
+            wb.close()
+            return False
+        ws = wb['S.TCGTTD']
+        package_members = []
+        current_group = None
+        headers = []
+        
+        target_group = "TCG" if "chuyên gia" in group_name.lower() else "TTD"
+        
+        for row in ws.iter_rows(values_only=True):
+            row_str = [str(c).strip() if c is not None else "" for c in row]
+            if not any(row_str):
+                continue
+            row_joined = " ".join(row_str).upper()
+            if "TỔ CHUYÊN GIA" in row_joined:
+                current_group = "TCG"
+                headers = []
+                continue
+            elif "TỔ THẨM ĐỊNH" in row_joined:
+                current_group = "TTD"
+                headers = []
+                continue
+                
+            if current_group == target_group:
+                if "TT" in row_str or "Tên thành viên" in row_str or "Họ và tên" in row_str:
+                    headers = row_str
+                    continue
+                if headers:
+                    name = row_str[1] if len(row_str) > 1 else ""
+                    if name and name.replace(".", "").strip() not in ("", "Tên thành viên", "Họ và tên"):
+                        clean_name = name.strip()
+                        if clean_name in selected_member_names:
+                            package_members.append({
+                                "Tên thành viên": clean_name,
+                                "Chức vụ": row_str[2] if len(row_str) > 2 else "",
+                                "Vị trí": row_str[3] if len(row_str) > 3 else "",
+                                "Phân công công việc": row_str[4] if len(row_str) > 4 else ""
+                            })
+        wb.close()
+        
+        if not package_members:
+            return False
+            
+        df_global = ds.get_table("TCGTTD")
+        if df_global is None or df_global.empty:
+            df_temp = pd.DataFrame(package_members)
+            df_temp[key_id] = goi_thau_id
+            ds.conn.register("TCGTTD", df_temp)
+            return True
+            
+        joined_rows = []
+        for pm in package_members:
+            name = pm["Tên thành viên"]
+            global_match = df_global[df_global["Họ và tên"].str.strip() == name]
+            row_data = {
+                key_id: goi_thau_id,
+                "Họ và tên": name,
+                "Chức vụ": pm["Chức vụ"],
+                "Vị trí": pm["Vị trí"],
+                "Phân công công việc": pm["Phân công công việc"]
+            }
+            if not global_match.empty:
+                g_row = global_match.iloc[0].to_dict()
+                for k, v in g_row.items():
+                    if k not in row_data:
+                        row_data[k] = v
+            else:
+                for col in df_global.columns:
+                    if col not in row_data:
+                        row_data[col] = ""
+            joined_rows.append(row_data)
+            
+        df_temp = pd.DataFrame(joined_rows)
+        ds.conn.register("TCGTTD", df_temp)
+        return True
+    except Exception as e:
+        print(f"❌ Error registering temporary TCGTTD: {e}")
+        return False
+
+
 def get_packages(option_key: str) -> list[str]:
     if not option_key:
         return []
@@ -284,7 +440,10 @@ def get_packages(option_key: str) -> list[str]:
     sheet = opt_config.get("sheet", "GoiThau")
     show_format = opt_config.get("show", "")
     
-    sql = resolve_sheet_query(sheet)
+    if opt_config.get("type") == "Repeat":
+        sql = 'SELECT * FROM "GoiThau"'
+    else:
+        sql = resolve_sheet_query(sheet)
     try:
         rows = ds.query(f"SELECT * FROM ({sql}) ORDER BY CAST(TT AS INTEGER)")
     except Exception:
@@ -342,7 +501,7 @@ def get_workflow_templates(option_key: str, package_label: str, sheet_rows: list
         return []
         
     opt_config = get_option_config(option_key)
-    key_id = opt_config.get("key_id", "GoiThau_ID")
+    key_id = opt_config.get("key_id", "ID")
     show_format = opt_config.get("show", "")
     
     if sheet_rows is not None:
@@ -474,7 +633,7 @@ def run_preview(option_key: str, package_label: str,
     # --- Build context (copy từ run_batch) ---
     opt_config = get_option_config(option_key)
     sheet = opt_config.get("sheet", "GoiThau")
-    key_id = opt_config.get("key_id", "GoiThau_ID")
+    key_id = opt_config.get("key_id", "ID")
     show_format = opt_config.get("show", "")
 
     sql = resolve_sheet_query(sheet)
@@ -661,7 +820,7 @@ Thời gian chạy: {elapsed:.1f} giây
 
 
 async def run_batch(option_key: str, package_label: str, selected_templates: list[str],
-                          progress: gr.Progress = gr.Progress(), retry_state: dict | None = None):
+                    group_name: str = "", progress: gr.Progress = gr.Progress(), retry_state: dict | None = None):
 
     if not option_key or not option_key.strip():
         yield "", "⚠️ Vui lòng chọn quy trình", None
@@ -670,15 +829,168 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
         yield "", "⚠️ Vui lòng chọn gói thầu", None
         return
     if not selected_templates or len(selected_templates) == 0:
-        yield "", "⚠️ Vui lòng chọn ít nhất 1 template", None
+        yield "", "⚠️ Vui lòng chọn ít nhất 1 template hoặc thành viên", None
         return
 
     opt = option_key.split(":")[0].strip() if ":" in option_key else option_key.strip()
 
     opt_config = get_option_config(option_key)
     sheet = opt_config.get("sheet", "GoiThau")
-    key_id = opt_config.get("key_id", "GoiThau_ID")
+    key_id = opt_config.get("key_id", "ID")
     show_format = opt_config.get("show", "")
+
+    # Query initial package to get goi_thau_id
+    temp_sql = 'SELECT * FROM "GoiThau"'
+    temp_rows = ds.query(temp_sql)
+    selected_pkg_initial = None
+    for r in temp_rows:
+        if safe_format(show_format, r) == package_label:
+            selected_pkg_initial = r
+            break
+    if not selected_pkg_initial:
+        yield "", "❌ Không tìm thấy dòng dữ liệu tương ứng", None
+        return
+    goi_thau_id = _str(selected_pkg_initial.get(key_id))
+
+    sql = resolve_sheet_query(sheet)
+
+    if opt_config.get("type") == "Repeat":
+        templates = get_workflow_templates(option_key, package_label, sheet_rows=temp_rows)
+        target_word = "Cam ket TCG" if "chuyên gia" in group_name.lower() else "Cam ket TTD"
+        matched_tpl = next((t for t in templates if target_word in str(t.get("File", ""))), None)
+        if not matched_tpl:
+            yield "", f"❌ Không tìm thấy template cho {group_name}", None
+            return
+
+        fname_raw = _str(matched_tpl.get("File", ""))
+        fname = fname_raw if fname_raw.endswith(".docx") else fname_raw + ".docx"
+
+        if not retry_state:
+            clear_output_folder(config)
+
+        try:
+            tables_rows = ds.query("SELECT * FROM Tables")
+        except Exception:
+            tables_rows = []
+
+        config_rows = get_config_for_option(option_key)
+
+        xlsx_files = sorted(config.data_path.glob("*.xlsx"))
+        danh_muc_file = next(
+            (f for f in xlsx_files if "DanhMuc" in f.stem or "danh muc" in f.stem.lower()),
+            xlsx_files[0] if xlsx_files else None
+        )
+
+        results = []
+        failed_templates = []
+        has_locked = False
+        has_other_error = False
+        
+        logger = IncrementalRunLogger(config, goi_thau_id, opt, "retry" if retry_state else "run")
+        logger.write_header(option_key, package_label, len(selected_templates))
+
+        for i, member_name in enumerate(selected_templates):
+            if progress:
+                progress((i + 1) / len(selected_templates), desc=f"Đang xử lý thành viên: {member_name}")
+
+            try:
+                register_temporary_tcgttd(goi_thau_id, [member_name], group_name, key_id)
+
+                joined_rows = ds.query(sql)
+                if not joined_rows:
+                    raise RuntimeError(f"Không thể kết nối thông tin cho thành viên {member_name}")
+                member_pkg_row = joined_rows[0]
+
+                context = {}
+                for r in config_rows:
+                    key = _str(r.get("Key"))
+                    col = _str(r.get("Value"))
+                    if not key or not col:
+                        continue
+                    clean_key = clean_config_key(key)
+                    raw_value = member_pkg_row.get(col, "")
+                    try:
+                        is_na = pd.isna(raw_value)
+                    except (TypeError, ValueError):
+                        is_na = False
+                    if is_na:
+                        raw_value = ""
+                    elif isinstance(raw_value, datetime):
+                        raw_value = raw_value.strftime("%d/%m/%Y")
+                    elif raw_value is None:
+                        raw_value = ""
+                    context[clean_key] = str(raw_value)
+
+                context["HoTen"] = member_name
+                context["Ho_va_ten"] = member_name
+                context["ChucVu"] = member_pkg_row.get("Chức vụ", "")
+                context["ViTri"] = member_pkg_row.get("Vị trí", "")
+                context["PhanCong"] = member_pkg_row.get("Phân công công việc", "")
+
+                nested_context = make_nested_dict(context)
+                nested_context["now"] = datetime.now()
+
+                src_dir = config.template_path / opt
+                src = src_dir / fname
+                if not src.exists():
+                    possible = list(src_dir.glob(f"{fname}*"))
+                    if possible:
+                        src = possible[0]
+                dst = config.output_path / src.name
+
+                def do_copy(s=src, d=dst):
+                    shutil.copy2(s, d)
+                write_with_retry(do_copy, max_retries=3, delay=2.0)
+
+                def do_merge():
+                    return mail_merge_safe(dst, nested_context, dst)
+                ok, err = write_with_retry(do_merge, max_retries=3, delay=2.0)
+                if not ok:
+                    raise RuntimeError(err)
+
+                if danh_muc_file and danh_muc_file.exists():
+                    try:
+                        copy_tables_for_file(dst, config, goi_thau_id, tables_rows, danh_muc_file, key_id)
+                    except Exception as table_err:
+                        print(f"⚠️ Lỗi copy bảng: {table_err}")
+
+                new_filename = f"{src.stem.replace('-Template', '')}-{goi_thau_id}-{member_name}.docx"
+                new_path = config.output_path / new_filename
+                if dst.exists():
+                    dst.rename(new_path)
+
+                results.append(f"✅ {member_name} → {new_filename}")
+                logger.ok_count += 1
+                logger.log_event("✅", f"{member_name} → {new_filename}")
+
+            except PermissionError as e:
+                has_locked = True
+                failed_templates.append(member_name)
+                results.append(f"🔒 {member_name}: Lỗi ghi file (đang mở)")
+                logger.error_count += 1
+            except Exception as e:
+                has_other_error = True
+                failed_templates.append(member_name)
+                results.append(f"❌ {member_name}: {e}")
+                logger.error_count += 1
+
+            yield "\n".join(results), f"Đang xử lý {i + 1}/{len(selected_templates)}...", None
+
+        elapsed = time.time() - logger.start_time
+        summary = f"✅ {logger.ok_count}  ❌ {logger.error_count}  /  {len(selected_templates)} người  ({elapsed:.1f}s)"
+        logger.write_footer()
+
+        retry_state_data = None
+        if failed_templates:
+            retry_state_data = {
+                "option_key": option_key,
+                "package_label": package_label,
+                "failed_templates": failed_templates,
+                "all_locked": has_locked and not has_other_error,
+                "group_name": group_name
+            }
+        yield "\n".join(results), summary, retry_state_data
+        return
 
     sql = resolve_sheet_query(sheet)
     goi_thau_rows = ds.query(sql)
@@ -935,6 +1247,7 @@ def create_ui():
                         options = get_options()
                         option_radio = gr.Radio(choices=options, label="Chọn Quy trình")
                         package_radio = gr.Radio(choices=[], label="Chọn Dữ liệu")
+                        group_radio = gr.Radio(choices=["Tổ chuyên gia", "Tổ thẩm định"], label="Chọn nhóm nhân sự (Tổ chuyên gia/Tổ thẩm định)", visible=False, value="Tổ chuyên gia")
 
                         with gr.Group():
                             gr.Markdown("**Preview thông tin:**")
@@ -975,7 +1288,7 @@ def create_ui():
                     rerun_btn = gr.Button("← Chạy lại", variant="secondary")
                     retry_btn = gr.Button("🔄 Chạy lại file lỗi", variant="stop", visible=False)
 
-        def on_package_change(pkg):
+        def on_package_change(pkg, group):
             opt = _sel["opt"]
             sheet_rows = _sel["sheet_rows"]
             details = get_package_details(opt, pkg, sheet_rows)
@@ -990,18 +1303,47 @@ def create_ui():
                 all_tpls = get_all_option_templates(opt)
                 return preview_text, gr.update(choices=all_tpls, value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)"), None, gr.update(visible=False), gr.update(visible=False)
 
-            templates = get_workflow_templates(opt, pkg, sheet_rows)
-            choices = [t.get("Name", "") for t in templates]
-            _sel["template_total"] = len(choices)
-            label_text = f"**Chọn template cần xử lý** ({len(choices)} file)"
-            _sel["pkg"] = pkg
-
-            return preview_text, gr.update(choices=choices, value=[]), gr.update(value=label_text), None, gr.update(visible=False), gr.update(visible=False)
+            opt_config = get_option_config(opt)
+            if opt_config.get("type") == "Repeat":
+                goi_thau_id = details.get(opt_config.get("key_id", "ID"), "")
+                members = get_repeat_members(goi_thau_id, group)
+                _sel["template_total"] = len(members)
+                label_text = f"**Chọn thành viên cần xuất cam kết** ({len(members)} người)"
+                _sel["pkg"] = pkg
+                return preview_text, gr.update(choices=members, value=[]), gr.update(value=label_text), None, gr.update(visible=False), gr.update(visible=False)
+            else:
+                templates = get_workflow_templates(opt, pkg, sheet_rows)
+                choices = [t.get("Name", "") for t in templates]
+                _sel["template_total"] = len(choices)
+                label_text = f"**Chọn template cần xử lý** ({len(choices)} file)"
+                _sel["pkg"] = pkg
+                return preview_text, gr.update(choices=choices, value=[]), gr.update(value=label_text), None, gr.update(visible=False), gr.update(visible=False)
 
         package_radio.change(
             fn=on_package_change,
-            inputs=[package_radio],
+            inputs=[package_radio, group_radio],
             outputs=[pkg_preview, template_checkboxes, template_label, last_run_state, retry_btn, preview_box]
+        )
+
+        def on_group_change(group, pkg):
+            opt = _sel["opt"]
+            if not opt or not pkg:
+                return gr.update(choices=[], value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)")
+            opt_config = get_option_config(opt)
+            if opt_config.get("type") == "Repeat":
+                sheet_rows = _sel["sheet_rows"]
+                details = get_package_details(opt, pkg, sheet_rows)
+                goi_thau_id = details.get(opt_config.get("key_id", "ID"), "")
+                members = get_repeat_members(goi_thau_id, group)
+                _sel["template_total"] = len(members)
+                label_text = f"**Chọn thành viên cần xuất cam kết** ({len(members)} người)"
+                return gr.update(choices=members, value=[]), gr.update(value=label_text)
+            return gr.update(), gr.update()
+
+        group_radio.change(
+            fn=on_group_change,
+            inputs=[group_radio, package_radio],
+            outputs=[template_checkboxes, template_label]
         )
 
         def on_option_change(opt):
@@ -1011,11 +1353,17 @@ def create_ui():
             all_tpls = get_all_option_templates(opt)
             if not opt:
                 pkgs = []
+                show_group = gr.update(visible=False, value="Tổ chuyên gia")
             else:
                 opt_config = get_option_config(opt)
                 sheet = opt_config.get("sheet", "GoiThau")
                 show_format = opt_config.get("show", "")
-                sql = resolve_sheet_query(sheet)
+                if opt_config.get("type") == "Repeat":
+                    sql = 'SELECT * FROM "GoiThau"'
+                    show_group = gr.update(visible=True, value="Tổ chuyên gia")
+                else:
+                    sql = resolve_sheet_query(sheet)
+                    show_group = gr.update(visible=False, value="Tổ chuyên gia")
                 try:
                     rows = ds.query(f"SELECT * FROM ({sql}) ORDER BY CAST(TT AS INTEGER)")
                 except Exception:
@@ -1033,42 +1381,72 @@ def create_ui():
                 None,
                 gr.update(visible=False),
                 gr.update(visible=False),
+                show_group,
             )
 
         option_radio.change(
             fn=on_option_change,
             inputs=[option_radio],
-            outputs=[package_radio, template_checkboxes, template_label, pkg_preview, last_run_state, retry_btn, preview_box]
+            outputs=[package_radio, template_checkboxes, template_label, pkg_preview, last_run_state, retry_btn, preview_box, group_radio]
         )
 
         def update_checkbox_label(selected):
             total = _sel["template_total"]
             count = len(selected) if selected else 0
+            opt = _sel["opt"]
+            if opt:
+                opt_config = get_option_config(opt)
+                if opt_config.get("type") == "Repeat":
+                    return gr.update(value=f"**Chọn thành viên cần xuất cam kết** ({count}/{total} người)")
             return gr.update(value=f"**Chọn template cần xử lý** ({count}/{total} file)")
 
         template_checkboxes.change(fn=update_checkbox_label, inputs=[template_checkboxes], outputs=[template_label])
 
-        def select_all():
+        def select_all(group):
             opt, pkg = _sel["opt"], _sel["pkg"]
             if not opt or not pkg:
                 return gr.update(value=[])
-            templates = get_workflow_templates(opt, pkg, _sel["sheet_rows"])
-            choices = [t.get("Name", "") for t in templates]
-            return gr.update(value=choices)
+            opt_config = get_option_config(opt)
+            if opt_config.get("type") == "Repeat":
+                sheet_rows = _sel["sheet_rows"]
+                details = get_package_details(opt, pkg, sheet_rows)
+                goi_thau_id = details.get(opt_config.get("key_id", "ID"), "")
+                members = get_repeat_members(goi_thau_id, group)
+                return gr.update(value=members)
+            else:
+                templates = get_workflow_templates(opt, pkg, _sel["sheet_rows"])
+                choices = [t.get("Name", "") for t in templates]
+                return gr.update(value=choices)
 
         def deselect_all():
             return gr.update(value=[])
 
-        select_all_btn.click(fn=select_all, outputs=[template_checkboxes])
+        select_all_btn.click(fn=select_all, inputs=[group_radio], outputs=[template_checkboxes])
         deselect_all_btn.click(fn=deselect_all, outputs=[template_checkboxes])
 
-        def on_check(opt, pkg, selected):
-            result = run_preview(opt, pkg, selected)
-            return gr.update(value=result, visible=True)
+        def on_check(opt, pkg, selected, group):
+            opt_config = get_option_config(opt)
+            if opt_config.get("type") == "Repeat":
+                # For repeat, register temporary table before previewing
+                sheet_rows = _sel["sheet_rows"]
+                details = get_package_details(opt, pkg, sheet_rows)
+                goi_thau_id = details.get(opt_config.get("key_id", "ID"), "")
+                # Create and register temporary table
+                register_temporary_tcgttd(goi_thau_id, selected, group, opt_config.get("key_id", "ID"))
+                # Get the template names to pass to run_preview
+                templates = get_workflow_templates(opt, pkg, sheet_rows)
+                # Filter template depending on group
+                target_word = "Cam ket TCG" if "chuyên gia" in group.lower() else "Cam ket TTD"
+                selected_tpls = [t.get("Name", "") for t in templates if target_word in str(t.get("File", ""))]
+                result = run_preview(opt, pkg, selected_tpls)
+                return gr.update(value=result, visible=True)
+            else:
+                result = run_preview(opt, pkg, selected)
+                return gr.update(value=result, visible=True)
 
         check_btn.click(
             fn=on_check,
-            inputs=[option_radio, package_radio, template_checkboxes],
+            inputs=[option_radio, package_radio, template_checkboxes, group_radio],
             outputs=[preview_box],
         )
 
@@ -1091,7 +1469,7 @@ def create_ui():
             outputs=[run_btn],
         ).then(
             fn=run_batch,
-            inputs=[option_radio, package_radio, template_checkboxes],
+            inputs=[option_radio, package_radio, template_checkboxes, group_radio],
             outputs=[result_log, status_text, last_run_state],
             show_progress="full",
             trigger_mode="once",
@@ -1140,7 +1518,8 @@ def create_ui():
             option_key = retry_state["option_key"]
             package_label = retry_state["package_label"]
             failed_templates = retry_state["failed_templates"]
-            async for log, status, new_state in run_batch(option_key, package_label, failed_templates, progress, retry_state):
+            group_name = retry_state.get("group_name", "")
+            async for log, status, new_state in run_batch(option_key, package_label, failed_templates, group_name, progress, retry_state):
                 yield log, status, new_state
 
         def disable_retry():
@@ -1185,11 +1564,12 @@ def create_ui():
                 gr.update(value=""),
                 gr.update(selected=0),
                 None,
+                gr.update(visible=False, value="Tổ chuyên gia"),
             )
 
         rerun_btn.click(
             fn=on_rerun,
-            outputs=[option_radio, package_radio, template_checkboxes, pkg_preview, open_folder_btn, retry_btn, result_log, status_text, tabs, last_run_state],
+            outputs=[option_radio, package_radio, template_checkboxes, pkg_preview, open_folder_btn, retry_btn, result_log, status_text, tabs, last_run_state, group_radio],
         )
 
     return app

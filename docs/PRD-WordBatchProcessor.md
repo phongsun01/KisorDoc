@@ -106,8 +106,9 @@ Khi bắt đầu, tool quét **tất cả file `.xlsx`** trong thư mục Data v
 | `Value` | Các giấy tờ đến bước Hợp đồng | Tên hiển thị trên UI |
 | `Sheet` | S.GoiThau hoặc S.MayMuon | Tên sheet dữ liệu chính (KHÔNG dùng tiền tố `S.` để app load vào bộ nhớ) |
 | `Show` | `{TT}. {Số hiệu gói thầu} - {Tên gói thầu}` | Định dạng nhãn hiển thị cho gói thầu (hỗ trợ `{Tên Cột/Tên Biến}`) |
-| `KeyId` | GoiThau_ID | Cột khoá chính duy nhất của dữ liệu |
+| `KeyId` | GoiThau_ID | Cột khoá chính duy nhất của dữ liệu (mặc định là `ID` nếu trống) |
 | `Config` | 2-97 | Vùng dòng trong sheet Config thuộc về Option này (để trống = đọc toàn bộ sheet) |
+| `Type` | Repeat | Loại quy trình. Nếu là `Repeat` thì hiểu là chạy loop nhiều dòng (ví dụ thành viên) cho 1 template. |
 
 ### 3.4 Sheet `Workflow` – Định nghĩa template theo option
 
