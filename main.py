@@ -569,7 +569,7 @@ def run_preview(option_key: str, package_label: str,
 
         hide_str = f"  |  ẩn: {hide}" if hide else ""
         table_lines.append(
-            f"📋 {name} → {sheet}  {range_}  {row_count} dòng{hide_str}"
+            f"📋 {name} → {tbl_sheet}  {range_}  {row_count} dòng{hide_str}"
         )
 
     if wb:
@@ -931,13 +931,13 @@ def create_ui():
             with gr.Tab("1. Chọn & Chạy", id=0):
                 with gr.Row():
                     with gr.Column(scale=1):
-                        gr.Markdown("### Chọn quy trình & Gói thầu")
+                        gr.Markdown("### Chọn Quy trình")
                         options = get_options()
-                        option_radio = gr.Radio(choices=options, label="Chọn quy trình")
-                        package_radio = gr.Radio(choices=[], label="Chọn gói thầu/Dữ liệu")
+                        option_radio = gr.Radio(choices=options, label="Chọn Quy trình")
+                        package_radio = gr.Radio(choices=[], label="Chọn Dữ liệu")
 
                         with gr.Group():
-                            gr.Markdown("**Preview thông tin gói thầu:**")
+                            gr.Markdown("**Preview thông tin:**")
                             pkg_preview = gr.Textbox(label="", interactive=False, max_lines=4)
 
                     with gr.Column(scale=1):
