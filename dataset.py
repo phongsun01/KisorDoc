@@ -33,14 +33,19 @@ class DataSet:
                 if stripped.startswith(exception_prefix):
                     continue
                 safe_name = _safe_table_name(stripped)
-                if safe_name in self.table_names:
-                    continue
 
-                # FIX: Đọc data trực tiếp từ wb đang mở, không mở lại
                 df = _ws_to_dataframe(wb[sheet_name])
                 if df is not None and not df.empty:
-                    self.conn.register(safe_name, df)
-                    self.table_names.append(safe_name)
+                    if safe_name in self.table_names:
+                        try:
+                            existing_df = self.conn.execute(f'SELECT * FROM "{safe_name}"').fetchdf()
+                            combined_df = pd.concat([existing_df, df], ignore_index=True)
+                            self.conn.register(safe_name, combined_df)
+                        except Exception as merge_err:
+                            print(f"⚠️  Lỗi gộp sheet trùng tên '{safe_name}': {merge_err}")
+                    else:
+                        self.conn.register(safe_name, df)
+                        self.table_names.append(safe_name)
 
             wb.close()
 

@@ -121,9 +121,9 @@ def _match_word(tables_word: str, file_stem: str) -> bool:
     t = tables_word.strip().lower()
     f = file_stem.strip().lower()
     
-    # Remove leading numbers: "3. yeu cau" → "yeu cau"
-    f_no_prefix = re.sub(r"^\d+\.\s*", "", f)
-    t_no_prefix = re.sub(r"^\d+\.\s*", "", t)
+    # Remove leading numbers: "3. yeu cau" or "9.1 bc" or "18.2. bb" -> "yeu cau" or "bc" or "bb"
+    f_no_prefix = re.sub(r"^\d+(\.\d+)*\.?\s*", "", f).strip()
+    t_no_prefix = re.sub(r"^\d+(\.\d+)*\.?\s*", "", t).strip()
     
     # Exact match (best)
     if t == f or t == f_no_prefix or t_no_prefix == f or t_no_prefix == f_no_prefix:
