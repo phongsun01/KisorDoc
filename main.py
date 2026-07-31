@@ -208,59 +208,71 @@ def check_condition(condition_str: str, raw_row: dict, config_mappings: list[dic
 
 
 def parse_join_expression(expr: str) -> str:
+    """
+    Cú pháp rút gọn cho cột Sheet trong Options:
+      Table1 <* Table2 @ key           → LEFT JOIN, cùng tên cột
+      Table1 <* Table2 @ key1 = key2   → LEFT JOIN, khác tên cột
+      Table1 *> Table2 @ key           → RIGHT JOIN
+      Table1 * Table2 @ key            → INNER JOIN
+      Table1 <*> Table2 @ key          → FULL OUTER JOIN
+      SELECT ...                        → truyền thẳng cho DuckDB
+    """
     s = expr.strip()
     if s.lower().startswith("select"):
         return s
     if "@" not in s:
         return f'SELECT * FROM "{s}"'
-    parts = s.split("@")
-    join_part = parts[0].strip()
-    key_part = parts[1].strip()
-    
-    join_type = "INNER JOIN"
-    table1, table2 = "", ""
-    if " <*>" in join_part:
-        join_type = "FULL OUTER JOIN"
-        table1, table2 = join_part.split("<*>")
-    elif " <*" in join_part:
-        join_type = "LEFT JOIN"
-        table1, table2 = join_part.split("<*")
-    elif " *>" in join_part:
-        join_type = "RIGHT JOIN"
-        table1, table2 = join_part.split("*>")
-    elif " *" in join_part:
-        join_type = "INNER JOIN"
-        table1, table2 = join_part.split("*")
-    else:
+
+    join_part, key_raw = s.split("@", 1)
+    join_part = join_part.strip()
+    key_raw   = key_raw.strip()
+
+    _OP_MAP = [
+        (" <*>", "FULL OUTER JOIN"),
+        (" <*",  "LEFT JOIN"),
+        (" *>",  "RIGHT JOIN"),
+        (" *",   "INNER JOIN"),
+    ]
+    join_type = None
+    t1 = t2 = ""
+    for sym, jt in _OP_MAP:
+        if sym in join_part:
+            join_type = jt
+            left, right = join_part.split(sym.strip(), 1)
+            t1 = left.strip()
+            t2 = right.strip()
+            break
+
+    if not join_type:
         return f'SELECT * FROM "{s}"'
-        
-    t1 = table1.strip()
-    t2 = table2.strip()
-    
-    if "=" in key_part:
-        k_parts = key_part.split("=")
-        k1 = k_parts[0].strip()
-        k2 = k_parts[1].strip()
+
+    if "=" in key_raw:
+        k1, k2 = [k.strip() for k in key_raw.split("=", 1)]
     else:
-        k1 = key_part
-        k2 = key_part
-        
-    t1_alias = t1.split()[-1] if len(t1.split()) > 1 else t1
-    t2_alias = t2.split()[-1] if len(t2.split()) > 1 else t2
-    
-    return f'SELECT * FROM "{t1}" {join_type} "{t2}" ON "{t1_alias}".{k1} = "{t2_alias}".{k2}'
+        k1 = k2 = key_raw
+
+    return (
+        f'SELECT * FROM "{t1}" {join_type} "{t2}" '
+        f'ON "{t1}"."{k1}" = "{t2}"."{k2}"'
+    )
+
+
+_JOIN_RE = re.compile(r'.+\s+(?:<\*>|<\*|\*>|\*)\s+.+\s*@\s*.+', re.DOTALL)
 
 
 def resolve_sheet_query(sheet_name: str) -> str:
+    """
+    Chuyển đổi giá trị cột Sheet trong Options thành SQL:
+    - Bắt đầu bằng SELECT → passthrough
+    - Khớp pattern join rút gọn → gọi parse_join_expression
+    - Còn lại → SELECT * FROM "<sheet_name>"
+    """
     s = sheet_name.strip()
+    if not s:
+        return f'SELECT * FROM "{s}"'
     if s.lower().startswith("select"):
         return s
-    has_join = False
-    for sym in (" <*>", " <*", " *>", " *"):
-        if sym in s and "@" in s:
-            has_join = True
-            break
-    if has_join:
+    if _JOIN_RE.match(s):
         return parse_join_expression(s)
     return f'SELECT * FROM "{s}"'
 
