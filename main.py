@@ -136,6 +136,17 @@ def get_config_for_option(option_key: str) -> list[dict]:
         return []
 
 
+def get_all_option_templates(option_key: str) -> list[str]:
+    if not option_key:
+        return []
+    opt = option_key.split(":")[0].strip() if ":" in option_key else option_key.strip()
+    try:
+        ws_rows = ds.query("SELECT * FROM Workflow")
+    except Exception:
+        ws_rows = []
+    return [str(r.get("Name", "")) for r in ws_rows if _str(r.get("Option")) == opt]
+
+
 def safe_format(pattern: str, row: dict) -> str:
     if not pattern:
         return ""
@@ -861,7 +872,8 @@ def create_ui():
 
             if not opt or not pkg:
                 _sel["template_total"] = 0
-                return preview_text, gr.update(choices=[], value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)"), None, gr.update(visible=False), gr.update(visible=False)
+                all_tpls = get_all_option_templates(opt)
+                return preview_text, gr.update(choices=all_tpls, value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)"), None, gr.update(visible=False), gr.update(visible=False)
 
             templates = get_workflow_templates(opt, pkg, sheet_rows)
             choices = [t.get("Name", "") for t in templates]
@@ -881,6 +893,7 @@ def create_ui():
             _sel["opt"] = opt or ""
             _sel["sheet_rows"] = []
             _sel["template_total"] = 0
+            all_tpls = get_all_option_templates(opt)
             if not opt:
                 pkgs = []
             else:
@@ -898,7 +911,7 @@ def create_ui():
                 pkgs = [label for r in rows if (label := safe_format(show_format, r))]
             return (
                 gr.update(choices=pkgs, value=None),
-                gr.update(choices=[], value=[]),
+                gr.update(choices=all_tpls, value=[]),
                 gr.update(value="**Chọn template cần xử lý** (0 file)"),
                 "",
                 None,
