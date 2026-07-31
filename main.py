@@ -38,12 +38,33 @@ def _str(val, default=""):
 
 def clean_config_key(key: str) -> str:
     clean = key.strip("<>{}| ")
-    for suffix in (".Date.Long", ".Date", ".Upper", ".Number"):
+    
+    # Maps dot date suffixes to _Date suffix
+    for suffix in (".Date.Long", ".Date.long", ".date_long"):
         if clean.endswith(suffix):
-            clean = clean[: -len(suffix)]
+            return clean[:-len(suffix)] + "_Date"
+            
+    if clean.endswith(".Date") or clean.endswith(".date"):
+        return clean[:-5] + "_Date"
+        
+    if clean.endswith(".Day") or clean.endswith(".day"):
+        return clean[:-4] + "_Date"
+        
+    if clean.endswith(".Month") or clean.endswith(".month"):
+        return clean[:-6] + "_Date"
+        
+    if clean.endswith(".Year") or clean.endswith(".year"):
+        return clean[:-5] + "_Date"
+        
+    # Other standard modifiers
+    for suffix in (".Upper", ".upper", ".Number", ".number"):
+        if clean.endswith(suffix):
+            clean = clean[:-len(suffix)]
             break
+            
     if "|" in clean:
         clean = clean.split("|")[0].strip()
+        
     return clean
 
 
@@ -355,15 +376,8 @@ def run_preview(option_key: str, package_label: str,
             is_na = False
 
         context_keys.add(clean_key)
-        k_clean = key.strip("<>{}| ")
-        is_date_field = k_clean.endswith(".Date") or k_clean.endswith(".Date.Long")
-        if is_date_field:
-            context_keys.add(f"{clean_key}_Date")
-
         if is_na or raw_value is None or str(raw_value).strip() == "":
             missing_keys.append(clean_key)
-            if is_date_field:
-                missing_keys.append(f"{clean_key}_Date")
 
     lines = []
 
@@ -580,9 +594,6 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
             raw_value = ""
 
         context[clean_key] = str(raw_value)
-        k_clean = key.strip("<>{}| ")
-        if k_clean.endswith(".Date") or k_clean.endswith(".Date.Long"):
-            context[f"{clean_key}_Date"] = str(raw_value)
 
     nested_context = make_nested_dict(context)
     nested_context["now"] = datetime.now()

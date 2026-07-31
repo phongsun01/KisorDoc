@@ -20,37 +20,47 @@ def map_modifier(content_str):
     # 1. Tra cứu và chuẩn hoá modifier
     # Mẫu ngày tháng
     if val.endswith(".Date.Long") or val.endswith(".date_long") or val.endswith(".Date.long"):
-        base = re.sub(r"\.Date\.Long$|\.date_long$|\.Date\.long$", "", val)
-        return f"{{{{{base.strip()}|date_long}}}}"
+        base = re.sub(r"\.Date\.Long$|\.date_long$|\.Date\.long$", "", val).strip()
+        if not base.endswith("_Date") and not base.endswith("_date"):
+            base = base + "_Date"
+        return f"{{{{{base}|date_long}}}}"
         
     elif val.endswith(".Date") or val.endswith(".date"):
-        base = re.sub(r"\.Date$|\.date$", "", val)
-        return f"{{{{{base.strip()}|date}}}}"
+        base = re.sub(r"\.Date$|\.date$", "", val).strip()
+        if not base.endswith("_Date") and not base.endswith("_date"):
+            base = base + "_Date"
+        return f"{{{{{base}|date}}}}"
         
     elif val.endswith(".Day") or val.endswith(".day"):
-        base = re.sub(r"\.Day$|\.day$", "", val)
-        return f"{{{{{base.strip()}|day}}}}"
+        base = re.sub(r"\.Day$|\.day$", "", val).strip()
+        if not base.endswith("_Date") and not base.endswith("_date"):
+            base = base + "_Date"
+        return f"{{{{{base}|day}}}}"
         
     elif val.endswith(".Month") or val.endswith(".month"):
-        base = re.sub(r"\.Month$|\.month$", "", val)
-        return f"{{{{{base.strip()}|month}}}}"
+        base = re.sub(r"\.Month$|\.month$", "", val).strip()
+        if not base.endswith("_Date") and not base.endswith("_date"):
+            base = base + "_Date"
+        return f"{{{{{base}|month}}}}"
         
     elif val.endswith(".Year") or val.endswith(".year"):
-        base = re.sub(r"\.Year$|\.year$", "", val)
-        return f"{{{{{base.strip()}|year}}}}"
+        base = re.sub(r"\.Year$|\.year$", "", val).strip()
+        if not base.endswith("_Date") and not base.endswith("_date"):
+            base = base + "_Date"
+        return f"{{{{{base}|year}}}}"
         
     # Mẫu số và chữ
     elif val.endswith(".Number") or val.endswith(".number"):
-        base = re.sub(r"\.Number$|\.number$", "", val)
-        return f"{{{{{base.strip()}|number}}}}"
+        base = re.sub(r"\.Number$|\.number$", "", val).strip()
+        return f"{{{{{base}|number}}}}"
         
     elif val.endswith(".Chu") or val.endswith(".chu") or val.endswith(".Text") or val.endswith(".text"):
-        base = re.sub(r"\.Chu$|\.chu$|\.Text$|\.text$", "", val)
-        return f"{{{{{base.strip()}|num2text}}}}"
+        base = re.sub(r"\.Chu$|\.chu$|\.Text$|\.text$", "", val).strip()
+        return f"{{{{{base}|num2text}}}}"
         
     elif val.endswith(".Upper") or val.endswith(".upper"):
-        base = re.sub(r"\.Upper$|\.upper$", "", val)
-        return f"{{{{{base.strip()}|upper}}}}"
+        base = re.sub(r"\.Upper$|\.upper$", "", val).strip()
+        return f"{{{{{base}|upper}}}}"
         
     # Nếu đã có filter dạng | thì giữ nguyên hoặc chuẩn hoá
     elif "|" in val:
@@ -58,18 +68,28 @@ def map_modifier(content_str):
         base = parts[0].strip()
         mod = parts[1].strip().lower()
         if mod == "date_long":
+            if not base.endswith("_Date") and not base.endswith("_date"):
+                base = base + "_Date"
             return f"{{{{{base}|date_long}}}}"
         elif mod == "date":
+            if not base.endswith("_Date") and not base.endswith("_date"):
+                base = base + "_Date"
             return f"{{{{{base}|date}}}}"
         elif mod == "number":
             return f"{{{{{base}|number}}}}"
         elif mod == "num2text":
             return f"{{{{{base}|num2text}}}}"
         elif mod == "day":
+            if not base.endswith("_Date") and not base.endswith("_date"):
+                base = base + "_Date"
             return f"{{{{{base}|day}}}}"
         elif mod == "month":
+            if not base.endswith("_Date") and not base.endswith("_date"):
+                base = base + "_Date"
             return f"{{{{{base}|month}}}}"
         elif mod == "year":
+            if not base.endswith("_Date") and not base.endswith("_date"):
+                base = base + "_Date"
             return f"{{{{{base}|year}}}}"
         elif mod == "upper":
             return f"{{{{{base}|upper}}}}"

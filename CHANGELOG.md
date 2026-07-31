@@ -3,7 +3,8 @@
 ## [2.0.1] - 2026-07-31
 
 ### Fixed
-- Khắc phục hoàn toàn lỗi cảnh báo thiếu dữ liệu (`Warning: Placeholder ... không có data`) khi chạy các template đã được migrate bằng cách ánh xạ đồng thời cả khóa gốc và khóa hậu tố `_Date` (tương thích ngược hoàn toàn với cả template mới `{{Dexuat}}` và template migrate cũ `{{Dexuat_Date}}`).
+- Khắc phục hoàn toàn lỗi cảnh báo thiếu dữ liệu (`Warning: Placeholder ... không có data`) bằng cách tự động ánh xạ đuôi `.Date` thành hậu tố `_Date` trong cả logic nạp context (`clean_config_key`) của `main.py` và script `migrate_modifiers.py`.
+- Sửa lỗi xung đột (collision) ghi đè giữa Số quyết định (ví dụ: `KHLCNT_QD`) và Ngày quyết định (ví dụ: `KHLCNT_QD_Date`).
 
 ## [2.0.0] - 2026-07-30
 
