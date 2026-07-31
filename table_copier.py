@@ -77,10 +77,12 @@ def copy_tables_for_file(
             print(f"⚠️  '{placeholder_key}': {len(occurrences)} dòng Tables nhưng "
                   f"{len(doc_occ_list)} lần xuất hiện trong Word")
 
-        for i, occ in enumerate(occurrences):
-            if i >= len(doc_occ_list):
-                break
-            para_element = doc_occ_list[i]
+        for i, para_element in enumerate(doc_occ_list):
+            if i < len(occurrences):
+                occ = occurrences[i]
+            else:
+                occ = occurrences[-1]
+
             sheet = str(occ.get("Sheet", "")).strip()
             range_spec = str(occ.get("Range", "A1")).strip()
             hide_cols = str(occ.get("Hide", "")).strip()
