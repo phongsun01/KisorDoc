@@ -355,8 +355,15 @@ def run_preview(option_key: str, package_label: str,
             is_na = False
 
         context_keys.add(clean_key)
+        k_clean = key.strip("<>{}| ")
+        is_date_field = k_clean.endswith(".Date") or k_clean.endswith(".Date.Long")
+        if is_date_field:
+            context_keys.add(f"{clean_key}_Date")
+
         if is_na or raw_value is None or str(raw_value).strip() == "":
             missing_keys.append(clean_key)
+            if is_date_field:
+                missing_keys.append(f"{clean_key}_Date")
 
     lines = []
 
@@ -573,6 +580,9 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
             raw_value = ""
 
         context[clean_key] = str(raw_value)
+        k_clean = key.strip("<>{}| ")
+        if k_clean.endswith(".Date") or k_clean.endswith(".Date.Long"):
+            context[f"{clean_key}_Date"] = str(raw_value)
 
     nested_context = make_nested_dict(context)
     nested_context["now"] = datetime.now()

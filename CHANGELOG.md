@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.0.1] - 2026-07-31
+
+### Fixed
+- Khắc phục hoàn toàn lỗi cảnh báo thiếu dữ liệu (`Warning: Placeholder ... không có data`) khi chạy các template đã được migrate bằng cách ánh xạ đồng thời cả khóa gốc và khóa hậu tố `_Date` (tương thích ngược hoàn toàn với cả template mới `{{Dexuat}}` và template migrate cũ `{{Dexuat_Date}}`).
+
 ## [2.0.0] - 2026-07-30
 
 ### Added
