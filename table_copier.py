@@ -215,12 +215,13 @@ def _read_excel_range(xlsx_path: Path, sheet_name: str, range_spec: str, hide_co
                     visible_merged[(r - min_row, new_c)] = (r - min_row, new_c, rs, 1)
                 continue
             new_r = r - min_row
+            new_mr = mr - min_row
             new_c = col_map.get(c)
             new_mc = col_map.get(mc)
             if new_c is not None and new_mc is not None:
                 hidden_in_span = len([h for h in hidden_cols if mc <= h < mc + cs])
                 new_cs = max(1, cs - hidden_in_span)
-                visible_merged[(new_r, new_c)] = (new_r, new_mc, rs, new_cs)
+                visible_merged[(new_r, new_c)] = (new_mr, new_mc, rs, new_cs)
 
         row_heights = {}
         for r in range(min_row, max_row + 1):
