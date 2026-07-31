@@ -20,7 +20,7 @@ class DataSet:
     def _load(self):
         exception_prefix = self.config.ExceptionSheet
         for xlsx_file in sorted(self.config.data_path.glob("*.xlsx")):
-            if xlsx_file.name.startswith("~$"):
+            if xlsx_file.name.startswith("~$") or xlsx_file.name.startswith(exception_prefix):
                 continue
             # FIX: Chỉ mở file 1 lần duy nhất, dùng data_only=True luôn
             try:
