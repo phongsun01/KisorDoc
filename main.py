@@ -11,6 +11,9 @@ import socket
 import webbrowser
 import math
 
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
+
 sys.stdout.reconfigure(encoding="utf-8")
 
 import gradio as gr
