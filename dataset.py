@@ -50,7 +50,12 @@ class DataSet:
             wb.close()
 
     def query(self, sql: str) -> list[dict]:
-        return self.conn.execute(sql).fetchdf().to_dict(orient="records")
+        df = self.conn.execute(sql).fetchdf()
+        cols = list(df.columns)
+        if len(cols) != len(set(cols)):
+            dupes = {c for c in cols if cols.count(c) > 1}
+            print(f"⚠️  Cảnh báo: Phát hiện trùng tên cột {dupes} khi thực thi liên kết (Join). Vui lòng điều chỉnh lại tên cột trong Excel để tránh ghi đè dữ liệu.")
+        return df.to_dict(orient="records")
 
     def query_rows(self, sheet_name: str, row_start: int, row_end: int) -> list[dict]:
         cache_key = (sheet_name, row_start, row_end)

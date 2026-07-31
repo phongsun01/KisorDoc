@@ -207,6 +207,64 @@ def check_condition(condition_str: str, raw_row: dict, config_mappings: list[dic
         return False
 
 
+def parse_join_expression(expr: str) -> str:
+    s = expr.strip()
+    if s.lower().startswith("select"):
+        return s
+    if "@" not in s:
+        return f'SELECT * FROM "{s}"'
+    parts = s.split("@")
+    join_part = parts[0].strip()
+    key_part = parts[1].strip()
+    
+    join_type = "INNER JOIN"
+    table1, table2 = "", ""
+    if " <*>" in join_part:
+        join_type = "FULL OUTER JOIN"
+        table1, table2 = join_part.split("<*>")
+    elif " <*" in join_part:
+        join_type = "LEFT JOIN"
+        table1, table2 = join_part.split("<*")
+    elif " *>" in join_part:
+        join_type = "RIGHT JOIN"
+        table1, table2 = join_part.split("*>")
+    elif " *" in join_part:
+        join_type = "INNER JOIN"
+        table1, table2 = join_part.split("*")
+    else:
+        return f'SELECT * FROM "{s}"'
+        
+    t1 = table1.strip()
+    t2 = table2.strip()
+    
+    if "=" in key_part:
+        k_parts = key_part.split("=")
+        k1 = k_parts[0].strip()
+        k2 = k_parts[1].strip()
+    else:
+        k1 = key_part
+        k2 = key_part
+        
+    t1_alias = t1.split()[-1] if len(t1.split()) > 1 else t1
+    t2_alias = t2.split()[-1] if len(t2.split()) > 1 else t2
+    
+    return f'SELECT * FROM "{t1}" {join_type} "{t2}" ON "{t1_alias}".{k1} = "{t2_alias}".{k2}'
+
+
+def resolve_sheet_query(sheet_name: str) -> str:
+    s = sheet_name.strip()
+    if s.lower().startswith("select"):
+        return s
+    has_join = False
+    for sym in (" <*>", " <*", " *>", " *"):
+        if sym in s and "@" in s:
+            has_join = True
+            break
+    if has_join:
+        return parse_join_expression(s)
+    return f'SELECT * FROM "{s}"'
+
+
 def get_packages(option_key: str) -> list[str]:
     if not option_key:
         return []
@@ -214,11 +272,12 @@ def get_packages(option_key: str) -> list[str]:
     sheet = opt_config.get("sheet", "GoiThau")
     show_format = opt_config.get("show", "")
     
+    sql = resolve_sheet_query(sheet)
     try:
-        rows = ds.query(f"SELECT * FROM {sheet} ORDER BY CAST(TT AS INTEGER)")
+        rows = ds.query(f"SELECT * FROM ({sql}) ORDER BY CAST(TT AS INTEGER)")
     except Exception:
         try:
-            rows = ds.query(f"SELECT * FROM {sheet}")
+            rows = ds.query(sql)
         except Exception:
             rows = []
         
@@ -240,8 +299,9 @@ def get_package_details(option_key: str, package_label: str, sheet_rows: list[di
         rows = sheet_rows
     else:
         sheet = opt_config.get("sheet", "GoiThau")
+        sql = resolve_sheet_query(sheet)
         try:
-            rows = ds.query(f"SELECT * FROM {sheet}")
+            rows = ds.query(sql)
         except Exception:
             rows = []
         
@@ -277,8 +337,9 @@ def get_workflow_templates(option_key: str, package_label: str, sheet_rows: list
         main_rows = sheet_rows
     else:
         sheet = opt_config.get("sheet", "GoiThau")
+        sql = resolve_sheet_query(sheet)
         try:
-            main_rows = ds.query(f"SELECT * FROM {sheet}")
+            main_rows = ds.query(sql)
         except Exception:
             main_rows = []
         
@@ -364,7 +425,8 @@ def run_preview(option_key: str, package_label: str,
     key_id = opt_config.get("key_id", "GoiThau_ID")
     show_format = opt_config.get("show", "")
 
-    goi_thau_rows = ds.query(f"SELECT * FROM {sheet}")
+    sql = resolve_sheet_query(sheet)
+    goi_thau_rows = ds.query(sql)
     selected_pkg = next((
         r for r in goi_thau_rows
         if safe_format(show_format, r) == package_label
@@ -566,7 +628,8 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
     key_id = opt_config.get("key_id", "GoiThau_ID")
     show_format = opt_config.get("show", "")
 
-    goi_thau_rows = ds.query(f"SELECT * FROM {sheet}")
+    sql = resolve_sheet_query(sheet)
+    goi_thau_rows = ds.query(sql)
     selected_pkg = None
     for r in goi_thau_rows:
         label = safe_format(show_format, r)
@@ -900,11 +963,12 @@ def create_ui():
                 opt_config = get_option_config(opt)
                 sheet = opt_config.get("sheet", "GoiThau")
                 show_format = opt_config.get("show", "")
+                sql = resolve_sheet_query(sheet)
                 try:
-                    rows = ds.query(f"SELECT * FROM {sheet} ORDER BY CAST(TT AS INTEGER)")
+                    rows = ds.query(f"SELECT * FROM ({sql}) ORDER BY CAST(TT AS INTEGER)")
                 except Exception:
                     try:
-                        rows = ds.query(f"SELECT * FROM {sheet}")
+                        rows = ds.query(sql)
                     except Exception:
                         rows = []
                 _sel["sheet_rows"] = rows
