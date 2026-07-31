@@ -393,6 +393,21 @@ def _parse_price(val) -> float | None:
         return None
 
 
+class NestedVal(dict):
+    def __init__(self, val, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self["_val"] = val
+
+    def __str__(self):
+        return str(self.get("_val", ""))
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __html__(self):
+        return self.__str__()
+
+
 def make_nested_dict(flat_dict: dict) -> dict:
     nested = {}
     for key, value in flat_dict.items():
@@ -402,9 +417,34 @@ def make_nested_dict(flat_dict: dict) -> dict:
             if part not in d:
                 d[part] = {}
             elif not isinstance(d[part], dict):
-                d[part] = {"_val": d[part]}
+                d[part] = NestedVal(d[part])
             d = d[part]
-        d[parts[-1]] = value
+            
+        last_part = parts[-1]
+        if last_part in d:
+            if isinstance(d[last_part], dict):
+                d[last_part]["_val"] = value
+            else:
+                d[last_part] = value
+        else:
+            d[last_part] = value
+            
+    # Post-process: Convert any standard dict that has "_val" key into NestedVal
+    def convert_to_nested_val(obj):
+        if isinstance(obj, dict):
+            for k, v in list(obj.items()):
+                obj[k] = convert_to_nested_val(v)
+            if "_val" in obj and not isinstance(obj, NestedVal):
+                nv = NestedVal(obj["_val"])
+                for k, v in obj.items():
+                    if k != "_val":
+                        nv[k] = v
+                return nv
+        return obj
+
+    for k, v in list(nested.items()):
+        nested[k] = convert_to_nested_val(v)
+        
     return nested
 
 
