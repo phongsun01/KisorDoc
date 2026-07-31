@@ -68,9 +68,24 @@ KisorDoc-AI running at http://127.0.0.1:7864
 
 ## 3. Khắc phục một số lỗi thường gặp
 
-### Lỗi 1: `OSError: Cannot find empty port in range: 7864-7864`
-* **Nguyên nhân:** Cổng mạng `7864` đang bị chiếm dụng bởi một tiến trình chạy nền khác (có thể là ứng dụng Gradio cũ chưa được tắt hoàn toàn).
-* **Khắc phục:** Mở file `main.py`, tìm đến dòng định nghĩa `PORT = 7864` ở cuối file và đổi sang một cổng trống khác (ví dụ: `7865`, `7866`,...) rồi chạy lại.
+### Lỗi 1: Cổng mạng bị chiếm dụng (Nhảy cổng sang 7865 hoặc báo lỗi cổng)
+* **Nguyên nhân:** Cổng mạng `7864` đang bị chiếm dụng bởi một tiến trình chạy nền khác (thường là KisorDoc-AI cũ chưa được tắt hoàn toàn).
+* **Khắc phục:**
+  1. **Đóng nhanh tất cả các tiến trình Python đang chạy ngầm:**
+     Mở CMD hoặc PowerShell và chạy lệnh:
+     ```powershell
+     taskkill /f /im python.exe
+     ```
+  2. **Tìm và tắt chính xác tiến trình đang chiếm cổng 7864:**
+     * Tìm ID tiến trình (PID) đang lắng nghe cổng 7864:
+       ```powershell
+       netstat -ano | findstr 7864
+       ```
+       *(Dòng kết quả trả về sẽ có ID số ở cuối, ví dụ: `LISTENING   12448`)*
+     * Tiêu diệt tiến trình đó (thay `<PID>` bằng số vừa tìm được):
+       ```powershell
+       taskkill /f /pid <PID>
+       ```
 
 ### Lỗi 2: `ModuleNotFoundError: No module named '...'`
 * **Nguyên nhân:** Bạn chưa kích hoạt môi trường ảo `.venv` hoặc chưa cài đặt đầy đủ thư viện từ `requirements.txt`.
