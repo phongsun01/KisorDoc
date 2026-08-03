@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.2.1] - 2026-08-03
+
+### Changed
+- **Tái cấu trúc thư viện dùng chung (Patch-v8):** Di chuyển các class/hàm helper `NestedVal` và `make_nested_dict` từ `app.py` vào module dùng chung `kisorlib/app_helpers.py` để cả `app.py` và `engine.py` cùng chia sẻ, giảm thiểu trùng lặp mã và tăng độ ổn định của hệ thống.
+- Cập nhật và tối ưu hóa an toàn relative imports bên trong core library `kisorlib`.
+
 ## [3.2.0] - 2026-08-03
 
 ### Changed
