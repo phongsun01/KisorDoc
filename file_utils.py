@@ -60,8 +60,8 @@ def copy_templates_to_output(config: AppConfig, option: str, filenames: list[str
         dst = config.output_path / src.name
         
         # FIX F6-07: Tự động retry khi copy template bị locked
-        max_retries = config.FileMaxRetries
-        delay = config.FileRetryDelay
+        max_retries = getattr(config, "FileMaxRetries", 3)
+        delay = getattr(config, "FileRetryDelay", 2.0)
         copied_ok = False
         for attempt in range(1, max_retries + 1):
             try:

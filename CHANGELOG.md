@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.2.2] - 2026-08-03
+
+### Added
+- **Xử lý File Locked nâng cao (F6):** Bắt lỗi `PermissionError` (khi Word chiếm dụng file), tự động retry tối đa `FILE_MAX_RETRIES` lần sau mỗi `FILE_RETRY_DELAY` giây. Đánh dấu trạng thái file bị khóa dạng `🔒` thay vì `❌`.
+- **Validation trước khi chạy (F1):** Chặn sớm việc chạy batch và thông báo lỗi rõ ràng nếu thiếu Option, Gói thầu, Template hoặc dữ liệu chưa sẵn sàng.
+- **Dry-run / Preview Mode (F2):** Bổ sung nút "🔍 Kiểm tra" trên UI, trích xuất placeholder an toàn từ ZIP Docx, áp dụng custom filters và hiển thị bảng kết quả Preview (`gr.Dataframe`) trực quan.
+- **Lưu trạng thái & Chạy lại file lỗi (F3):** Tự động phát hiện lỗi và hiển thị nút "Chạy lại file lỗi" để chỉ merge lại các file bị lỗi mà không cần xóa/xử lý lại các file thành công.
+- **Export log ra file text (F4):** Ghi log incremental khi chạy, định dạng `utf-8-sig` chuẩn Notepad Windows, tự động dọn dẹp log cũ >30 ngày (giới hạn 100 file log).
+- **Lộ trình Refactor codebase:** Thống nhất kế hoạch đóng gói thư viện `kisordoc/`, FastAPI endpoints, và script khởi chạy song song `runner.py`.
+
 ## [2.2.0] - 2026-07-31
 
 ### Added
