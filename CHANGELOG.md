@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.0.0] - 2026-08-03
+
+### Added
+- **Core Library Packaging (`kisordoc/`):** Tái cấu trúc đóng gói toàn bộ logic xử lý nghiệp vụ (`config.py`, `dataset.py`, `table_copier.py`, `merger.py`, `file_utils.py`, `filters.py`) vào package `kisordoc/`.
+- **Core Engine API (`kisordoc/engine.py`):** Xây dựng điểm vào duy nhất (Public API) cho các tác vụ mail-merge và dry-run sử dụng Pydantic models (`GenerateRequest`/`GenerateResult`) và cơ chế callback tiến trình `on_progress`.
+- **Tích hợp FastAPI Backend (`api.py`):** Cung cấp các RESTful API endpoints `/generate`, `/templates`, `/packages` tự động sinh tài liệu Swagger.
+- **Khởi chạy song song (`runner.py`):** Hỗ trợ khởi chạy đồng thời Gradio UI (`app.py` ở cổng 7864) và FastAPI API (`api.py` ở cổng 8000) thông qua thread an toàn chỉ bằng một lệnh duy nhất.
+- **Tách biệt cấu hình nhãn giao diện (`ui_labels.json`):** Chuyển toàn bộ chuỗi ký tự hiển thị trên Gradio UI ra file cấu hình JSON độc lập giúp thay đổi nhãn động không cần sửa code.
+- **Cải tiến giao diện chọn template:** Tự động ẩn cột chọn file template khi chưa chọn gói thầu và chỉ hiển thị sau khi đã nạp dữ liệu thành công.
+
+### Fixed
+- Khắc phục lỗi `❌ Không tìm thấy dòng dữ liệu tương ứng` khi chạy batch hoặc dry-run đối với các Option đặc thù (như Mua sắm nhỏ Opt1 lấy từ bảng `MuaSamNho`).
+- Khắc phục lỗi crash do component Textbox của phiên bản Gradio mới không hỗ trợ tham số `show_copy_button`.
+- Sửa lỗi nút Mở thư mục log/output trên Windows console bằng cách chuyển sang `subprocess.Popen`.
+
 ## [2.2.2] - 2026-08-03
 
 ### Added

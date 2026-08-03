@@ -5,7 +5,7 @@ import time
 import subprocess
 from pathlib import Path
 
-from config import AppConfig
+from .config import AppConfig
 
 
 def clear_output_folder(config: AppConfig):

@@ -13,7 +13,7 @@ from pathlib import Path
 import openpyxl
 from docx import Document
 from lxml import etree
-from config import AppConfig
+from .config import AppConfig
 
 # FIX 1: Bỏ hardcode — placeholder pattern động, nhận bất kỳ tên nào trong {{...}}
 TABLE_PLACEHOLDER_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")

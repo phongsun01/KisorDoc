@@ -7,7 +7,7 @@ import duckdb
 import pandas as pd
 import openpyxl
 from pathlib import Path
-from config import AppConfig
+from .config import AppConfig
 
 
 class DataSet:

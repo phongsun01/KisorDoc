@@ -2,7 +2,7 @@ import jinja2
 from docxtpl import DocxTemplate
 from pathlib import Path
 from datetime import datetime
-from filters import (
+from .filters import (
     filter_date, filter_date_long, filter_number, filter_num2text,
     filter_day, filter_month, filter_year, filter_add_days,
     filter_add_months, filter_date_diff, filter_quarter,

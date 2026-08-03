@@ -18,11 +18,11 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 import gradio as gr
 
-from config import load_config, AppConfig
-from dataset import DataSet
-from file_utils import clear_output_folder, copy_templates_to_output, rename_output, open_output_folder, cleanup_old_logs, open_logs_folder
-from merger import mail_merge_safe
-from table_copier import copy_tables_for_file
+from kisordoc.config import load_config, AppConfig
+from kisordoc.dataset import DataSet
+from kisordoc.file_utils import clear_output_folder, copy_templates_to_output, rename_output, open_output_folder, cleanup_old_logs, open_logs_folder
+from kisordoc.merger import mail_merge_safe
+from kisordoc.table_copier import copy_tables_for_file
 import shutil
 from docxtpl import DocxTemplate
 
@@ -71,11 +71,20 @@ def clean_config_key(key: str) -> str:
     return clean
 
 
+ui_labels = {}
+
 def init():
-    global config, ds
+    global config, ds, ui_labels
     config = load_config()
     ds = DataSet(config)
     cleanup_old_logs(config)
+    try:
+        import json
+        with open("ui_labels.json", "r", encoding="utf-8") as f:
+            ui_labels = json.load(f)
+    except Exception as e:
+        print(f"⚠️ Không load được ui_labels.json: {e}")
+        ui_labels = {}
 
 
 def get_options() -> list[str]:
@@ -640,7 +649,7 @@ def run_preview(option_key: str, package_label: str,
     goi_thau_rows = ds.query(sql)
     selected_pkg = next((
         r for r in goi_thau_rows
-        if safe_format(show_format, r) == package_label
+        if print(f"DEBUG run_preview: label={repr(safe_format(show_format, r))}, package_label={repr(package_label)}, equal={safe_format(show_format, r) == package_label}") or safe_format(show_format, r) == package_label
     ), None)
     if not selected_pkg:
         return "❌ Không tìm thấy dòng dữ liệu tương ứng"
@@ -840,7 +849,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
     show_format = opt_config.get("show", "")
 
     # Query initial package to get goi_thau_id
-    temp_sql = 'SELECT * FROM "GoiThau"'
+    temp_sql = resolve_sheet_query(sheet)
     temp_rows = ds.query(temp_sql)
     selected_pkg_initial = None
     for r in temp_rows:
@@ -997,6 +1006,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
     selected_pkg = None
     for r in goi_thau_rows:
         label = safe_format(show_format, r)
+        print(f"DEBUG run_batch: label={repr(label)}, package_label={repr(package_label)}, equal={label == package_label}")
         if label == package_label:
             selected_pkg = r
             break
@@ -1123,7 +1133,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
             missing_placeholders = []
             try:
                 import jinja2
-                from filters import (
+                from kisordoc.filters import (
                     filter_date, filter_date_long, filter_number, filter_num2text,
                     filter_day, filter_month, filter_year, filter_add_days,
                     filter_add_months, filter_date_diff, filter_quarter,
@@ -1234,8 +1244,8 @@ def create_ui():
 
     _sel = {"opt": "", "pkg": "", "sheet_rows": [], "template_total": 0}
 
-    with gr.Blocks(title=config.AppName) as app:
-        gr.Markdown(f"# {config.AppName} – Xử lý tài liệu tự động")
+    with gr.Blocks(title=ui_labels.get("app_title", "KisorDoc-AI")) as app:
+        gr.Markdown(ui_labels.get("app_title", "KisorDoc-AI – Xử lý tài liệu tự động"))
 
         last_run_state = gr.State(None)
 
@@ -1243,27 +1253,27 @@ def create_ui():
             with gr.Tab("1. Chọn & Chạy", id=0):
                 with gr.Row():
                     with gr.Column(scale=1):
-                        gr.Markdown("### Chọn Quy trình")
+                        gr.Markdown("### " + ui_labels.get("workflow_section", "Chọn Quy trình"))
                         options = get_options()
-                        option_radio = gr.Radio(choices=options, label="Chọn Quy trình")
-                        package_radio = gr.Radio(choices=[], label="Chọn Dữ liệu")
+                        option_radio = gr.Radio(choices=options, label=ui_labels.get("workflow_section", "Chọn Quy trình"))
+                        package_radio = gr.Radio(choices=[], label=ui_labels.get("package_section", "Chọn Dữ liệu"))
                         group_radio = gr.Radio(choices=["Tổ chuyên gia", "Tổ thẩm định"], label="Chọn nhóm nhân sự (Tổ chuyên gia/Tổ thẩm định)", visible=False, value="Tổ chuyên gia")
 
                         with gr.Group():
-                            gr.Markdown("**Preview thông tin:**")
+                            gr.Markdown("**" + ui_labels.get("preview_section", "Preview thông tin:") + "**")
                             pkg_preview = gr.Textbox(label="", interactive=False, max_lines=4)
 
-                    with gr.Column(scale=1):
-                        gr.Markdown("### Chọn file template & Chạy")
+                    with gr.Column(scale=1, visible=False) as template_col:
+                        gr.Markdown("### " + ui_labels.get("template_section", "Chọn file template & Chạy"))
                         template_label = gr.Markdown("**Chọn template cần xử lý** (0 file)")
                         template_checkboxes = gr.CheckboxGroup(label="", choices=[])
 
                         with gr.Row():
-                            select_all_btn = gr.Button("✓ Chọn tất cả")
-                            deselect_all_btn = gr.Button("✗ Bỏ chọn tất cả")
+                            select_all_btn = gr.Button(ui_labels.get("select_all_btn", "✓ Chọn tất cả"))
+                            deselect_all_btn = gr.Button(ui_labels.get("deselect_all_btn", "✗ Bỏ chọn tất cả"))
 
-                        run_btn = gr.Button("🚀 Chạy", variant="primary", size="lg")
-                        check_btn = gr.Button("🔍 Kiểm tra", variant="secondary")
+                        run_btn = gr.Button(ui_labels.get("run_btn", "🚀 Chạy"), variant="primary", size="lg")
+                        check_btn = gr.Button(ui_labels.get("check_btn", "🔍 Kiểm tra"), variant="secondary")
                         preview_box = gr.Textbox(
                             label="Kết quả kiểm tra",
                             interactive=False,
@@ -1272,7 +1282,7 @@ def create_ui():
                             visible=False,
                         )
 
-            with gr.Tab("2. Log & Kết quả", id=1):
+            with gr.Tab(ui_labels.get("logs_tab", "2. Log & Kết quả"), id=1):
                 gr.Markdown("### Kết quả xử lý")
                 result_log = gr.Textbox(
                     label="Chi tiết kết quả",
@@ -1283,10 +1293,10 @@ def create_ui():
                 status_text = gr.Textbox(label="Trạng thái", interactive=False)
 
                 with gr.Row():
-                    open_folder_btn = gr.Button("📂 Mở thư mục output", visible=False)
-                    open_logs_btn = gr.Button("📋 Mở thư mục log", visible=True)
-                    rerun_btn = gr.Button("← Chạy lại", variant="secondary")
-                    retry_btn = gr.Button("🔄 Chạy lại file lỗi", variant="stop", visible=False)
+                    open_folder_btn = gr.Button(ui_labels.get("open_folder_btn", "📂 Mở thư mục output"), visible=False)
+                    open_logs_btn = gr.Button(ui_labels.get("open_logs_btn", "📋 Mở thư mục log"), visible=True)
+                    rerun_btn = gr.Button(ui_labels.get("rerun_btn", "← Quay lại"), variant="secondary")
+                    retry_btn = gr.Button(ui_labels.get("retry_btn", "🔄 Chạy lại file lỗi"), variant="stop", visible=False)
 
         def on_package_change(pkg, group):
             opt = _sel["opt"]
@@ -1301,7 +1311,7 @@ def create_ui():
             if not opt or not pkg:
                 _sel["template_total"] = 0
                 all_tpls = get_all_option_templates(opt)
-                return preview_text, gr.update(choices=all_tpls, value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)"), None, gr.update(visible=False), gr.update(visible=False)
+                return preview_text, gr.update(choices=all_tpls, value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)"), None, gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
 
             opt_config = get_option_config(opt)
             if opt_config.get("type") == "Repeat":
@@ -1310,19 +1320,19 @@ def create_ui():
                 _sel["template_total"] = len(members)
                 label_text = f"**Chọn thành viên cần xuất cam kết** ({len(members)} người)"
                 _sel["pkg"] = pkg
-                return preview_text, gr.update(choices=members, value=[]), gr.update(value=label_text), None, gr.update(visible=False), gr.update(visible=False)
+                return preview_text, gr.update(choices=members, value=[]), gr.update(value=label_text), None, gr.update(visible=False), gr.update(visible=False), gr.update(visible=True)
             else:
                 templates = get_workflow_templates(opt, pkg, sheet_rows)
                 choices = [t.get("Name", "") for t in templates]
                 _sel["template_total"] = len(choices)
                 label_text = f"**Chọn template cần xử lý** ({len(choices)} file)"
                 _sel["pkg"] = pkg
-                return preview_text, gr.update(choices=choices, value=[]), gr.update(value=label_text), None, gr.update(visible=False), gr.update(visible=False)
+                return preview_text, gr.update(choices=choices, value=[]), gr.update(value=label_text), None, gr.update(visible=False), gr.update(visible=False), gr.update(visible=True)
 
         package_radio.change(
             fn=on_package_change,
             inputs=[package_radio, group_radio],
-            outputs=[pkg_preview, template_checkboxes, template_label, last_run_state, retry_btn, preview_box]
+            outputs=[pkg_preview, template_checkboxes, template_label, last_run_state, retry_btn, preview_box, template_col]
         )
 
         def on_group_change(group, pkg):
@@ -1487,8 +1497,13 @@ def create_ui():
 
         def on_open_folder():
             try:
-                open_output_folder(config)
-                return "✅ Thư mục đã mở"
+                import subprocess
+                path = str(config.output_path.resolve())
+                if os.path.exists(path):
+                    subprocess.Popen(f'explorer "{path}"', shell=True)
+                    return f"✅ Đã mở thư mục output: {path}"
+                else:
+                    return f"❌ Không tìm thấy thư mục output: {path}"
             except Exception as e:
                 return f"❌ Lỗi mở thư mục: {e}"
 
@@ -1496,8 +1511,13 @@ def create_ui():
 
         def on_open_logs():
             try:
-                open_logs_folder(config)
-                return "✅ Thư mục log đã mở"
+                import subprocess
+                path = str((Path(config.ProjectPath) / "logs").resolve())
+                if os.path.exists(path):
+                    subprocess.Popen(f'explorer "{path}"', shell=True)
+                    return f"✅ Đã mở thư mục log: {path}"
+                else:
+                    return f"❌ Không tìm thấy thư mục log: {path}"
             except Exception as e:
                 return f"❌ Lỗi mở thư mục log: {e}"
 
@@ -1565,11 +1585,12 @@ def create_ui():
                 gr.update(selected=0),
                 None,
                 gr.update(visible=False, value="Tổ chuyên gia"),
+                gr.update(visible=False),
             )
 
         rerun_btn.click(
             fn=on_rerun,
-            outputs=[option_radio, package_radio, template_checkboxes, pkg_preview, open_folder_btn, retry_btn, result_log, status_text, tabs, last_run_state, group_radio],
+            outputs=[option_radio, package_radio, template_checkboxes, pkg_preview, open_folder_btn, retry_btn, result_log, status_text, tabs, last_run_state, group_radio, template_col],
         )
 
     return app

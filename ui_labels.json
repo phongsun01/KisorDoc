@@ -1,0 +1,16 @@
+{
+  "app_title": "KisorDoc-AI – Xử lý tài liệu tự động",
+  "workflow_section": "Chọn Quy trình",
+  "package_section": "Chọn Dữ liệu",
+  "preview_section": "Preview thông tin:",
+  "template_section": "Chọn file template & Chạy",
+  "select_all_btn": "✓ Chọn tất cả",
+  "deselect_all_btn": "✗ Bỏ chọn tất cả",
+  "check_btn": "🔍 Kiểm tra",
+  "run_btn": "🚀 Chạy",
+  "retry_btn": "🔄 Chạy lại file lỗi",
+  "rerun_btn": "← Quay lại",
+  "logs_tab": "2. Log & Kết quả",
+  "open_folder_btn": "📂 Mở thư mục output",
+  "open_logs_btn": "📋 Mở thư mục log"
+}
