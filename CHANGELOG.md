@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.2.0] - 2026-08-03
+
+### Changed
+- **Đổi tên Core Package (`kisorlib`):** Đổi tên toàn bộ thư mục thư viện dùng chung từ `kisordoc/` thành `kisorlib/` để tăng tính chuyên nghiệp, đồng thời cập nhật toàn bộ import trong `app.py`, `api.py`, `runner.py`, và `tests/test_engine.py`.
+- **Định dạng Date khoảng trắng chừa trống:** Cố định **3 khoảng trắng** cho ngày và tháng khi bị trống dữ liệu trên Excel (Ví dụ: `"ngày   tháng 07 năm 2026"`, `"ngày   tháng   năm 2026"`).
+
 ## [3.1.0] - 2026-08-03
 
 ### Added

@@ -19,11 +19,11 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 import gradio as gr
 
-from kisordoc.config import load_config, AppConfig
-from kisordoc.dataset import DataSet
-from kisordoc.file_utils import clear_output_folder, copy_templates_to_output, rename_output, open_output_folder, cleanup_old_logs, open_logs_folder
-from kisordoc.merger import mail_merge_safe
-from kisordoc.table_copier import copy_tables_for_file
+from kisorlib.config import load_config, AppConfig
+from kisorlib.dataset import DataSet
+from kisorlib.file_utils import clear_output_folder, copy_templates_to_output, rename_output, open_output_folder, cleanup_old_logs, open_logs_folder
+from kisorlib.merger import mail_merge_safe
+from kisorlib.table_copier import copy_tables_for_file
 import shutil
 from docxtpl import DocxTemplate
 
@@ -1137,7 +1137,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
             missing_placeholders = []
             try:
                 import jinja2
-                from kisordoc.filters import (
+                from kisorlib.filters import (
                     filter_date, filter_date_long, filter_number, filter_num2text,
                     filter_day, filter_month, filter_year, filter_add_days,
                     filter_add_months, filter_date_diff, filter_quarter,

@@ -1014,6 +1014,23 @@ F5 (Version pin)    ← Nice-to-have, làm cuối
 *   **Cảnh báo trùng tên cột (Column Collision Warning):** Khi thực hiện join, nếu phát hiện 2 bảng cùng có các cột trùng tên nhau, hệ thống sẽ in cảnh báo chi tiết màu vàng lên Gradio UI/Log để người dùng nhận diện và điều chỉnh lại trong Excel, tránh ghi đè dữ liệu sai lệch.
 
 ### 11.5 Tối ưu hóa khởi động hệ thống
+*   Nạp DuckDB thông qua thư viện trung gian giúp giảm thời gian khởi chạy ban đầu xuống dưới 1 giây.
+
+---
+
+## 12. Các cập nhật trong Phiên bản 3.1 (2026-08-03)
+
+### 12.1 Đổi tên Core Package sang `kisorlib`
+*   Đổi tên toàn bộ thư mục thư viện cốt lõi từ `kisordoc/` thành **`kisorlib/`**.
+*   Đồng bộ toàn bộ các import tham chiếu tới `kisordoc` sang `kisorlib` trong tất cả file của dự án (`app.py`, `api.py`, `runner.py`, `tests/test_engine.py`).
+*   Cách đặt tên mới giúp tăng tính chuyên nghiệp, định vị rõ ràng đây là thư viện dùng chung cho toàn bộ dự án.
+
+### 12.2 Cải tiến hiển thị khoảng trắng ngày tháng trống
+*   Khi sử dụng các modifier định dạng ngày tháng như `.Date.Long` (hoặc `|date_long`), nếu chuỗi ngày tháng chứa dấu `/` nhưng bị bỏ trống (chỉ có khoảng trắng) thì hệ thống sẽ định dạng với **3 khoảng trắng** cố định cho phần trống.
+    *   Ví dụ ngày trống: `"   /07/2026"` $\rightarrow$ `"ngày   tháng 07 năm 2026"`
+    *   Ví dụ cả ngày và tháng trống: `"  /   /2026"` $\rightarrow$ `"ngày   tháng   năm 2026"`
+*   Cách hiển thị này tạo sự đồng đều thẩm mỹ trên văn bản và chừa khoảng trống vừa vặn để viết tay hoặc đóng dấu sau này.
+
 *   Tự động bỏ qua các file Excel nguồn chứa bảng biểu bắt đầu bằng chữ `S.` lúc khởi động app. Các file này chỉ được mở đọc khi thực hiện tiến trình chèn bảng biểu vào Word, giúp ứng dụng khởi động tức thì và tiết kiệm 90% dung lượng RAM.
 *   Hệ thống tự động thực hiện **gộp (concatenate)** dữ liệu từ nhiều file Excel khi phát hiện trùng tên sheet (Ví dụ: Sheet `Tables` có ở cả `Tables.xlsx` và `DanhMuc-MSSC.xlsx`).
 

@@ -1,6 +1,6 @@
 import pytest
 from pydantic import ValidationError
-from kisordoc.engine import GenerateRequest
+from kisorlib.engine import GenerateRequest
 
 
 def test_generate_request_validation():

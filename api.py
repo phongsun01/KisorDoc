@@ -40,7 +40,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 # ── Import engine ────────────────────────────────────────────────────────────
-from kisordoc.engine import (
+from kisorlib.engine import (
     LEVEL_ERROR,
     LEVEL_SUCCESS,
     LEVEL_WARNING,
@@ -50,7 +50,7 @@ from kisordoc.engine import (
     list_packages,
     list_templates,
 )
-from kisordoc.config import load_config   # type: ignore
+from kisorlib.config import load_config   # type: ignore
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -237,9 +237,9 @@ def _resolve_package_id(option: str, package_label: str) -> str:
     Nếu package_label đã là ID (không chứa " - ") thì trả thẳng.
     """
     # Import lazy
-    from kisordoc.config import load_config          # type: ignore
-    from kisordoc.dataset import DataSet             # type: ignore
-    from kisordoc.engine import _find_excel_files    # type: ignore
+    from kisorlib.config import load_config          # type: ignore
+    from kisorlib.dataset import DataSet             # type: ignore
+    from kisorlib.engine import _find_excel_files    # type: ignore
 
     cfg = load_config()
     data_dir = Path(cfg.ProjectPath) / "1. Data"
@@ -309,9 +309,9 @@ def get_options():
     Mỗi item có dạng: {"key": "Opt1", "label": "Opt1: Đấu thầu rộng rãi"}
     """
     try:
-        from kisordoc.config import load_config      # type: ignore
-        from kisordoc.dataset import DataSet         # type: ignore
-        from kisordoc.engine import _find_excel_files  # type: ignore
+        from kisorlib.config import load_config      # type: ignore
+        from kisorlib.dataset import DataSet         # type: ignore
+        from kisorlib.engine import _find_excel_files  # type: ignore
 
         cfg = load_config()
         data_dir = Path(cfg.ProjectPath) / "1. Data"
