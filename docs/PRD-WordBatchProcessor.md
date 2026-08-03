@@ -225,10 +225,14 @@ tpl.render(context, jenv)
 tpl.save("output.docx")
 ```
 
-**Xử lý lỗi:**
-- `|date` mà không parse được → `⚠️ Warning` + giữ nguyên giá trị gốc
+**Xử lý lỗi & Định dạng đặc thù:**
+- `|date` hoặc `|date_long` mà không parse được → `⚠️ Warning` + giữ nguyên giá trị gốc
 - `|number` mà không phải số → `❌ Lỗi` + dừng file đó
-- `|date` mà rỗng → lấy ngày hiện tại
+- `|date` hoặc `|date_long` mà rỗng → lấy ngày hiện tại
+- **Xử lý ngày tháng trống một phần (Chừa khoảng trống ghi tay)**:
+  - Đối với các bộ lọc ngày tháng (như `|date_long`), nếu chuỗi ngày tháng chứa dấu gạch chéo `/` nhưng có phần ngày hoặc tháng bị bỏ trống (chỉ chứa khoảng trắng):
+    - Nếu ngày trống (VD: `"   /07/2026"`): Tự động định dạng thành `"ngày   tháng 07 năm 2026"` (mặc định để 3 khoảng trắng trước ngày).
+    - Nếu cả ngày và tháng đều trống (VD: `"  /   /2026"`): Tự động định dạng thành `"ngày   tháng   năm 2026"` (mặc định để 3 khoảng trắng trước cả ngày và tháng).
 
 ---
 

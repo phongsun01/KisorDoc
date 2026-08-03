@@ -1,5 +1,15 @@
 # Changelog
 
+## [3.1.0] - 2026-08-03
+
+### Added
+- **Xử lý ngày tháng trống một phần (Chừa khoảng trống ghi tay):** Bổ sung logic xử lý cho filter ngày tháng (như `.Date.Long`), tự động định dạng các chuỗi ngày tháng chứa dấu gạch chéo `/` nhưng bị khuyết thông tin ngày hoặc tháng (VD: `"   /07/2026"`, `"  /   /2026"`) thành `"ngày   tháng 07 năm 2026"` và `"ngày   tháng   năm 2026"`, mặc định sử dụng 3 khoảng trắng cho phần bị trống để ghi tay sau.
+- **Cải tiến giao diện:** Cấu hình cột template bên phải luôn hiển thị (`visible=True`) ngay từ đầu để tránh co giãn layout, đồng thời giữ nguyên logic cập nhật danh sách động khi người dùng chọn Quy trình & Gói thầu.
+
+### Fixed
+- Khắc phục lỗi `Binder Error` khi chạy quy trình lặp `Repeat` (`Opt6`) do câu lệnh SQL Join bị rỗng lúc chưa nạp danh sách thành viên tạm thời.
+- Khắc phục lỗi thiếu thư viện `os` khi nhấn nút mở thư mục log/output trên giao diện.
+
 ## [3.0.0] - 2026-08-03
 
 ### Added

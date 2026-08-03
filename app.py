@@ -1,5 +1,6 @@
 import asyncio
 import errno
+import os
 import sys
 import threading
 import time
@@ -649,7 +650,7 @@ def run_preview(option_key: str, package_label: str,
     goi_thau_rows = ds.query(sql)
     selected_pkg = next((
         r for r in goi_thau_rows
-        if print(f"DEBUG run_preview: label={repr(safe_format(show_format, r))}, package_label={repr(package_label)}, equal={safe_format(show_format, r) == package_label}") or safe_format(show_format, r) == package_label
+        if safe_format(show_format, r) == package_label
     ), None)
     if not selected_pkg:
         return "❌ Không tìm thấy dòng dữ liệu tương ứng"
@@ -849,7 +850,10 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
     show_format = opt_config.get("show", "")
 
     # Query initial package to get goi_thau_id
-    temp_sql = resolve_sheet_query(sheet)
+    if opt_config.get("type") == "Repeat":
+        temp_sql = 'SELECT * FROM "GoiThau"'
+    else:
+        temp_sql = resolve_sheet_query(sheet)
     temp_rows = ds.query(temp_sql)
     selected_pkg_initial = None
     for r in temp_rows:
@@ -1006,7 +1010,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
     selected_pkg = None
     for r in goi_thau_rows:
         label = safe_format(show_format, r)
-        print(f"DEBUG run_batch: label={repr(label)}, package_label={repr(package_label)}, equal={label == package_label}")
+        # print(f"DEBUG run_batch: label={repr(label)}, package_label={repr(package_label)}, equal={label == package_label}")
         if label == package_label:
             selected_pkg = r
             break
@@ -1263,17 +1267,17 @@ def create_ui():
                             gr.Markdown("**" + ui_labels.get("preview_section", "Preview thông tin:") + "**")
                             pkg_preview = gr.Textbox(label="", interactive=False, max_lines=4)
 
-                    with gr.Column(scale=1, visible=False) as template_col:
+                    with gr.Column(scale=1) as template_col:
                         gr.Markdown("### " + ui_labels.get("template_section", "Chọn file template & Chạy"))
-                        template_label = gr.Markdown("**Chọn template cần xử lý** (0 file)")
-                        template_checkboxes = gr.CheckboxGroup(label="", choices=[])
+                        template_label = gr.Markdown("**Chọn template cần xử lý** (0 file)", visible=True)
+                        template_checkboxes = gr.CheckboxGroup(label="", choices=[], visible=True)
 
                         with gr.Row():
-                            select_all_btn = gr.Button(ui_labels.get("select_all_btn", "✓ Chọn tất cả"))
-                            deselect_all_btn = gr.Button(ui_labels.get("deselect_all_btn", "✗ Bỏ chọn tất cả"))
+                            select_all_btn = gr.Button(ui_labels.get("select_all_btn", "✓ Chọn tất cả"), visible=True)
+                            deselect_all_btn = gr.Button(ui_labels.get("deselect_all_btn", "✗ Bỏ chọn tất cả"), visible=True)
 
-                        run_btn = gr.Button(ui_labels.get("run_btn", "🚀 Chạy"), variant="primary", size="lg")
-                        check_btn = gr.Button(ui_labels.get("check_btn", "🔍 Kiểm tra"), variant="secondary")
+                        run_btn = gr.Button(ui_labels.get("run_btn", "🚀 Chạy"), variant="primary", size="lg", visible=True)
+                        check_btn = gr.Button(ui_labels.get("check_btn", "🔍 Kiểm tra"), variant="secondary", visible=True)
                         preview_box = gr.Textbox(
                             label="Kết quả kiểm tra",
                             interactive=False,
@@ -1308,10 +1312,22 @@ def create_ui():
                 lines = [f"{k}: {v}" for k, v in details.items() if v]
                 preview_text = "\n".join(lines)
 
+            # Trường hợp chưa chọn đủ
             if not opt or not pkg:
                 _sel["template_total"] = 0
                 all_tpls = get_all_option_templates(opt)
-                return preview_text, gr.update(choices=all_tpls, value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)"), None, gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
+                return (
+                    preview_text,
+                    gr.update(choices=all_tpls, value=[], visible=True),
+                    gr.update(value="**Chọn template cần xử lý** (0 file)", visible=True),
+                    None,
+                    gr.update(visible=False),
+                    gr.update(visible=False),
+                    gr.update(visible=True),
+                    gr.update(visible=True),
+                    gr.update(visible=True),
+                    gr.update(visible=True)
+                )
 
             opt_config = get_option_config(opt)
             if opt_config.get("type") == "Repeat":
@@ -1320,19 +1336,41 @@ def create_ui():
                 _sel["template_total"] = len(members)
                 label_text = f"**Chọn thành viên cần xuất cam kết** ({len(members)} người)"
                 _sel["pkg"] = pkg
-                return preview_text, gr.update(choices=members, value=[]), gr.update(value=label_text), None, gr.update(visible=False), gr.update(visible=False), gr.update(visible=True)
+                return (
+                    preview_text,
+                    gr.update(choices=members, value=[], visible=True),
+                    gr.update(value=label_text, visible=True),
+                    None,
+                    gr.update(visible=False),
+                    gr.update(visible=False),
+                    gr.update(visible=True),
+                    gr.update(visible=True),
+                    gr.update(visible=True),
+                    gr.update(visible=True)
+                )
             else:
                 templates = get_workflow_templates(opt, pkg, sheet_rows)
                 choices = [t.get("Name", "") for t in templates]
                 _sel["template_total"] = len(choices)
                 label_text = f"**Chọn template cần xử lý** ({len(choices)} file)"
                 _sel["pkg"] = pkg
-                return preview_text, gr.update(choices=choices, value=[]), gr.update(value=label_text), None, gr.update(visible=False), gr.update(visible=False), gr.update(visible=True)
+                return (
+                    preview_text,
+                    gr.update(choices=choices, value=[], visible=True),
+                    gr.update(value=label_text, visible=True),
+                    None,
+                    gr.update(visible=False),
+                    gr.update(visible=False),
+                    gr.update(visible=True),
+                    gr.update(visible=True),
+                    gr.update(visible=True),
+                    gr.update(visible=True)
+                )
 
         package_radio.change(
             fn=on_package_change,
             inputs=[package_radio, group_radio],
-            outputs=[pkg_preview, template_checkboxes, template_label, last_run_state, retry_btn, preview_box, template_col]
+            outputs=[pkg_preview, template_checkboxes, template_label, last_run_state, retry_btn, preview_box, select_all_btn, deselect_all_btn, run_btn, check_btn]
         )
 
         def on_group_change(group, pkg):
@@ -1576,8 +1614,8 @@ def create_ui():
             return (
                 gr.update(choices=initial_options, value=None),
                 gr.update(choices=[], value=None),
-                gr.update(value=[]),
-                gr.update(value=""),
+                gr.update(value=[], visible=True),
+                gr.update(value="**Chọn template cần xử lý** (0 file)", visible=True),
                 gr.update(visible=False),
                 gr.update(visible=False),
                 gr.update(value=""),
@@ -1585,12 +1623,15 @@ def create_ui():
                 gr.update(selected=0),
                 None,
                 gr.update(visible=False, value="Tổ chuyên gia"),
-                gr.update(visible=False),
+                gr.update(visible=True),
+                gr.update(visible=True),
+                gr.update(visible=True),
+                gr.update(visible=True)
             )
 
         rerun_btn.click(
             fn=on_rerun,
-            outputs=[option_radio, package_radio, template_checkboxes, pkg_preview, open_folder_btn, retry_btn, result_log, status_text, tabs, last_run_state, group_radio, template_col],
+            outputs=[option_radio, package_radio, template_checkboxes, template_label, open_folder_btn, retry_btn, result_log, status_text, tabs, last_run_state, group_radio, select_all_btn, deselect_all_btn, run_btn, check_btn],
         )
 
     return app
