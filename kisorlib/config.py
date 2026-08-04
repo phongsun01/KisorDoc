@@ -21,6 +21,8 @@ class AppConfig(BaseModel):
     FileRetryDelay: float = 2.0
     FileMaxRetries: int = 3
     DanhMucFile: str = "DanhMuc"
+    DefaultShow: str = "{TT}"
+    DefaultKeyId: str = "ID"
 
     @property
     def data_path(self) -> Path:
@@ -54,6 +56,8 @@ def load_config() -> AppConfig:
         "FILE_RETRY_DELAY": "FileRetryDelay",
         "FILE_MAX_RETRIES": "FileMaxRetries",
         "DANH_MUC_FILE": "DanhMucFile",
+        "DEFAULT_SHOW": "DefaultShow",
+        "DEFAULT_KEY_ID": "DefaultKeyId",
     }
 
     data = {}

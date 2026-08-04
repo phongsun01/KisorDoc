@@ -113,17 +113,19 @@ def get_option_config(option_key: str) -> dict:
         if _str(r.get("Key")) == opt_code:
             return {
                 "sheet": _str(r.get("Sheet"), config.DataSheet),
-                "show": _str(r.get("Show"), "{TT}"),
-                "key_id": _str(r.get("KeyId"), "ID"),
+                "show": _str(r.get("Show"), config.DefaultShow),
+                "key_id": _str(r.get("KeyId"), config.DefaultKeyId),
                 "config_range": _str(r.get("Config"), ""),
                 "type": _str(r.get("Type"), ""),
+                "sort_col": _str(r.get("SortCol"), ""),
             }
     return {
         "sheet": config.DataSheet,
-        "show": "{TT}",
-        "key_id": "ID",
+        "show": config.DefaultShow,
+        "key_id": config.DefaultKeyId,
         "config_range": "",
         "type": "",
+        "sort_col": "",
     }
 
 
@@ -452,7 +454,7 @@ def get_packages(option_key: str) -> list[str]:
     if not option_key:
         return []
     opt_config = get_option_config(option_key)
-    sheet = opt_config.get("sheet", "GoiThau")
+    sheet = opt_config.get("sheet", config.DataSheet)
     show_format = opt_config.get("show", "")
     if "|" in show_format:
         show_format = show_format.split("|")[0].strip()
@@ -462,8 +464,12 @@ def get_packages(option_key: str) -> list[str]:
         sql = f'SELECT * FROM "{ls}"' if ls else resolve_sheet_query(sheet)
     else:
         sql = resolve_sheet_query(sheet)
+    sort_col = opt_config.get("sort_col", "")
     try:
-        rows = ds.query(f"SELECT * FROM ({sql}) ORDER BY CAST(TT AS INTEGER)")
+        if sort_col:
+            rows = ds.query(f"SELECT * FROM ({sql}) ORDER BY CAST(\"{sort_col}\" AS INTEGER)")
+        else:
+            rows = ds.query(sql)
     except Exception:
         try:
             rows = ds.query(sql)
@@ -487,7 +493,7 @@ def get_package_details(option_key: str, package_label: str, sheet_rows: list[di
     if sheet_rows is not None:
         rows = sheet_rows
     else:
-        sheet = opt_config.get("sheet", "GoiThau")
+        sheet = opt_config.get("sheet", config.DataSheet)
         sql = resolve_sheet_query(sheet)
         try:
             rows = ds.query(sql)
@@ -525,7 +531,7 @@ def get_workflow_templates(option_key: str, package_label: str, sheet_rows: list
     if sheet_rows is not None:
         main_rows = sheet_rows
     else:
-        sheet = opt_config.get("sheet", "GoiThau")
+        sheet = opt_config.get("sheet", config.DataSheet)
         sql = resolve_sheet_query(sheet)
         try:
             main_rows = ds.query(sql)
@@ -547,14 +553,8 @@ def get_workflow_templates(option_key: str, package_label: str, sheet_rows: list
     filtered = []
     for r in wf_rows:
         condition_str = _str(r.get("Condition", ""))
-        if not condition_str:
-            # Không có Condition → luôn đưa vào (bỏ lọc Type/GoiThau_Loai)
-            pmin = _parse_price(r.get("Price", 0))
-            pmax = _parse_price(r.get("PriceMax", 0))
-            price = _parse_price(selected_pkg.get("Giá gói thầu", 0))
-            if pmin is not None and pmax is not None and price is not None:
-                if not (pmin <= price <= pmax):
-                    continue
+        if not condition_str or condition_str.upper() == "ALL":
+            # Không có Condition hoặc cấu hình là ALL → luôn đưa vào
             filtered.append(r)
         else:
             if check_condition(condition_str, selected_pkg, config_mappings):
@@ -595,7 +595,7 @@ def run_preview(option_key: str, package_label: str,
 
     # --- Build context (copy từ run_batch) ---
     opt_config = get_option_config(option_key)
-    sheet = opt_config.get("sheet", "GoiThau")
+    sheet = opt_config.get("sheet", config.DataSheet)
     key_id = opt_config.get("key_id", "ID")
     show_format = opt_config.get("show", "")
 
@@ -798,7 +798,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
     opt = option_key.split(":")[0].strip() if ":" in option_key else option_key.strip()
 
     opt_config = get_option_config(option_key)
-    sheet = opt_config.get("sheet", "GoiThau")
+    sheet = opt_config.get("sheet", config.DataSheet)
     key_id = opt_config.get("key_id", "ID")
     show_format = opt_config.get("show", "")
 
@@ -889,16 +889,24 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
                         raw_value = ""
                     context[clean_key] = str(raw_value)
 
-                # Trích xuất tên cột động từ phần bên phải của cột Show (sau dấu |)
-                member_col = "Họ và tên"
+                # Gán right_key (ví dụ: CCCD) vào context theo tên cột động
+                # right_key đã được phân tích từ cấu hình KeyId (vd: "GoiThau_ID | CCCD")
+                context[right_key] = _str(member_pkg_row.get(right_key, ""))
+
+                # Alias tương thích ngược: lấy tên cột đầu tiên từ phần Show sau dấu |
+                # (vd: "{Họ và tên} - {CCCD}" → member_col = "Họ và tên")
+                member_col = right_key  # fallback là right_key nếu không parse được
                 if "|" in show_format:
                     right_format = show_format.split("|", 1)[1]
                     matches = re.findall(r"\{([^}]+)\}", right_format)
                     if matches:
                         member_col = matches[0].strip()
-
-                context["HoTen"] = _str(member_pkg_row.get(member_col, member_name))
-                context["Ho_va_ten"] = context["HoTen"]
+                member_val = _str(member_pkg_row.get(member_col, member_name))
+                clean_member_key = clean_config_key(member_col)
+                context[clean_member_key] = member_val
+                # Giữ HoTen/Ho_va_ten để tương thích ngược với các template Word cũ
+                context["HoTen"] = member_val
+                context["Ho_va_ten"] = member_val
 
                 nested_context = make_nested_dict(context)
                 nested_context["now"] = datetime.now()
@@ -1222,7 +1230,13 @@ def create_ui():
                         options = get_options()
                         option_radio = gr.Radio(choices=options, label=ui_labels.get("workflow_section", "Chọn Quy trình"))
                         package_radio = gr.Radio(choices=[], label=ui_labels.get("package_section", "Chọn Dữ liệu"))
-                        group_radio = gr.Radio(choices=ui_labels.get("repeat_group_choices", ["Tổ chuyên gia", "Tổ thẩm định"]), label=ui_labels.get("repeat_group_title", "Chọn Nhóm lặp"), visible=False, value=ui_labels.get("repeat_group_choices", ["Tổ chuyên gia", "Tổ thẩm định"])[0] if ui_labels.get("repeat_group_choices") else "Tổ chuyên gia")
+                        _default_group = ui_labels.get("repeat_group_choices", [])
+                        group_radio = gr.Radio(
+                            choices=_default_group,
+                            label=ui_labels.get("repeat_group_title", "Chọn Nhóm lặp"),
+                            visible=False,
+                            value=_default_group[0] if _default_group else None
+                        )
 
                         with gr.Group():
                             gr.Markdown("**" + ui_labels.get("preview_section", "Preview thông tin:") + "**")
@@ -1371,22 +1385,27 @@ def create_ui():
                 show_group = gr.update(visible=False, choices=[])
             else:
                 opt_config = get_option_config(opt)
-                sheet = opt_config.get("sheet", "GoiThau")
+                sheet = opt_config.get("sheet", config.DataSheet)
                 show_format = opt_config.get("show", "")
                 if opt_config.get("type") == "Repeat":
-                    sql = 'SELECT * FROM "GoiThau"'
+                    ls, _, _ = _parse_repeat_sheet_config(opt_config)
+                    sql = f'SELECT * FROM "{ls}"' if ls else resolve_sheet_query(sheet)
                     opt_code = opt.split(":")[0].strip() if ":" in opt else opt.strip()
                     try:
                         wf_rows = ds.query(f"SELECT DISTINCT Name FROM Workflow WHERE Option = '{opt_code}'")
                         group_choices = [str(r["Name"]).strip() for r in wf_rows if r.get("Name")]
                     except Exception:
-                        group_choices = ["Tổ chuyên gia", "Tổ thẩm định"]
+                        group_choices = ui_labels.get("repeat_group_choices", [])
                     show_group = gr.update(choices=group_choices, visible=True, value=group_choices[0] if group_choices else None)
                 else:
                     sql = resolve_sheet_query(sheet)
                     show_group = gr.update(visible=False)
+                sort_col = opt_config.get("sort_col", "")
                 try:
-                    rows = ds.query(f"SELECT * FROM ({sql}) ORDER BY CAST(TT AS INTEGER)")
+                    if sort_col:
+                        rows = ds.query(f"SELECT * FROM ({sql}) ORDER BY CAST(\"{sort_col}\" AS INTEGER)")
+                    else:
+                        rows = ds.query(sql)
                 except Exception:
                     try:
                         rows = ds.query(sql)
@@ -1597,7 +1616,7 @@ def create_ui():
                 gr.update(value=""),
                 gr.update(selected=0),
                 None,
-                gr.update(visible=False, value=ui_labels.get("repeat_group_choices", ["Tổ chuyên gia"])[0] if ui_labels.get("repeat_group_choices") else "Tổ chuyên gia"),
+                gr.update(visible=False, value=next(iter(ui_labels.get("repeat_group_choices", [])), None)),
                 gr.update(visible=True),
                 gr.update(visible=True),
                 gr.update(visible=True),

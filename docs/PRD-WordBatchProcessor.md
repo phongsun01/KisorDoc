@@ -111,6 +111,7 @@ Khi bắt đầu, tool quét **tất cả file `.xlsx`** trong thư mục Data v
 | `KeyId` | GoiThau_ID | Cột khoá chính duy nhất của dữ liệu (mặc định là `ID` nếu trống) |
 | `Config` | 2-97 | Vùng dòng trong sheet Config thuộc về Option này (để trống = đọc toàn bộ sheet) |
 | `Type` | Repeat | Loại quy trình. Nếu là `Repeat` thì hiểu là chạy loop nhiều dòng (ví dụ thành viên) cho 1 template. |
+| `SortCol` | TT | Tên cột dùng để sắp xếp danh sách hiển thị theo thứ tự số nguyên. Để trống = không sắp xếp (an toàn với mọi sheet). |
 
 #### Cấu hình nâng cao trong chế độ Repeat:
 1. **Khớp nối Sheet (Join sheet):** Cột `Sheet` trong Options hỗ trợ biểu thức kết hợp bảng dạng `LeftSheet * RightSheet @ JoinKey` (Ví dụ: `GoiThau * TCGTTD @ GoiThau_ID`).
