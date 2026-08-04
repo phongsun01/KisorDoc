@@ -727,10 +727,19 @@ def run_preview(option_key: str, package_label: str,
     return "\n".join(lines)
 
 
-def write_with_retry(func, max_retries=3, delay=2.0, yield_fn=None):
+def write_with_retry(func, max_retries=3, delay=2.0, yield_fn=None) -> tuple[bool, str]:
+    """
+    Thực thi func() có retry khi gặp PermissionError (file đang bị khóa).
+    Luôn trả về (bool, str) để caller dùng pattern: ok, err = write_with_retry(...)
+    """
     for attempt in range(1, max_retries + 1):
         try:
-            return func()
+            result = func()
+            # Normalize: đảm bảo luôn trả (bool, str) dù func() trả gì
+            if isinstance(result, tuple) and len(result) == 2:
+                return bool(result[0]), str(result[1])
+            # func() không trả tuple (ví dụ: do_copy trả None) → coi như thành công
+            return True, ""
         except PermissionError as e:
             if "being used by another process" in str(e) or e.errno == errno.EACCES:
                 if attempt == max_retries:
@@ -741,6 +750,7 @@ def write_with_retry(func, max_retries=3, delay=2.0, yield_fn=None):
                 time.sleep(delay)
             else:
                 raise
+
 
 
 class IncrementalRunLogger:
