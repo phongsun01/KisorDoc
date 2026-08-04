@@ -20,6 +20,7 @@ class AppConfig(BaseModel):
     ExcelToWordWidthFactor: int = 90
     FileRetryDelay: float = 2.0
     FileMaxRetries: int = 3
+    DanhMucFile: str = "DanhMuc"
 
     @property
     def data_path(self) -> Path:
@@ -52,6 +53,7 @@ def load_config() -> AppConfig:
         "EXCEL_TO_WORD_WIDTH_FACTOR": "ExcelToWordWidthFactor",
         "FILE_RETRY_DELAY": "FileRetryDelay",
         "FILE_MAX_RETRIES": "FileMaxRetries",
+        "DANH_MUC_FILE": "DanhMucFile",
     }
 
     data = {}

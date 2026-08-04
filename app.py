@@ -79,6 +79,13 @@ def init():
     global config, ds, ui_labels
     config = load_config()
     ds = DataSet(config)
+    # Nhân bản các bảng để lưu dữ liệu gốc tránh bị ghi đè khi đăng ký bảng tạm
+    for tbl in list(ds.table_names):
+        try:
+            ds.conn.execute(f'DROP TABLE IF EXISTS "{tbl}_Goc"')
+            ds.conn.execute(f'CREATE TABLE "{tbl}_Goc" AS SELECT * FROM "{tbl}"')
+        except Exception as e:
+            print(f"⚠️ Không thể tạo bảng gốc sao lưu cho {tbl}: {e}")
     cleanup_old_logs(config)
     try:
         import json
@@ -105,15 +112,15 @@ def get_option_config(option_key: str) -> dict:
     for r in rows:
         if _str(r.get("Key")) == opt_code:
             return {
-                "sheet": _str(r.get("Sheet"), "GoiThau"),
-                "show": _str(r.get("Show"), "{TT}. {Số hiệu gói thầu} - {Tên gói thầu}"),
+                "sheet": _str(r.get("Sheet"), config.DataSheet),
+                "show": _str(r.get("Show"), "{TT}"),
                 "key_id": _str(r.get("KeyId"), "ID"),
                 "config_range": _str(r.get("Config"), ""),
                 "type": _str(r.get("Type"), ""),
             }
     return {
-        "sheet": "GoiThau",
-        "show": "{TT}. {Số hiệu gói thầu} - {Tên gói thầu}",
+        "sheet": config.DataSheet,
+        "show": "{TT}",
         "key_id": "ID",
         "config_range": "",
         "type": "",
@@ -290,9 +297,9 @@ def resolve_sheet_query(sheet_name: str) -> str:
     return f'SELECT * FROM "{s}"'
 
 
-def get_package_excel_file(goi_thau_id: str) -> Path | None:
+def get_package_excel_file(goi_thau_id: str, key_id: str = "GoiThau_ID") -> Path | None:
     try:
-        rows = ds.query(f"SELECT DISTINCT File FROM Tables WHERE GoiThau_ID = '{goi_thau_id}' AND File IS NOT NULL AND File != 'nan'")
+        rows = ds.query(f"SELECT DISTINCT File FROM Tables WHERE \"{key_id}\" = '{goi_thau_id}' AND File IS NOT NULL AND File != 'nan'")
         if rows:
             filename = str(rows[0]['File']).strip()
             filepath = config.data_path / filename
@@ -349,12 +356,11 @@ def get_repeat_members(goi_thau_id: str, group_type: str, option_key: str = None
         if join_key and goi_thau_id:
             safe_id = str(goi_thau_id).replace("'", "''")
             try:
-                rows = ds.query(f'SELECT * FROM "{right_sheet}" WHERE "{join_key}" = \'{safe_id}\'')
+                rows = ds.query(f'SELECT * FROM "{right_sheet}_Goc" WHERE "{join_key}" = \'{safe_id}\'')
             except Exception:
-                # Cột join_key không tồn tại trong sheet → lấy toàn bộ
-                rows = ds.query(f'SELECT * FROM "{right_sheet}"')
+                rows = ds.query(f'SELECT * FROM "{right_sheet}_Goc"')
         else:
-            rows = ds.query(f'SELECT * FROM "{right_sheet}"')
+            rows = ds.query(f'SELECT * FROM "{right_sheet}_Goc"')
     except Exception as e:
         print(f"❌ get_repeat_members query error: {e}")
         return []
@@ -373,94 +379,73 @@ def get_repeat_members(goi_thau_id: str, group_type: str, option_key: str = None
     return members
 
 
-def register_temporary_tcgttd(goi_thau_id: str, selected_member_names: list[str], group_name: str, key_id: str) -> bool:
-    excel_path = get_package_excel_file(goi_thau_id)
-    if not excel_path:
-        print(f"⚠️ Could not find excel path for package: {goi_thau_id}")
+def _parse_repeat_key_id(key_id_expr: str) -> tuple[str, str]:
+    """
+    Phân tích cấu hình KeyId dạng: 'GoiThau_ID | CCCD'
+    Trả về (left_key, right_key).
+    """
+    if not key_id_expr:
+        return "ID", "ID"
+    if "|" in key_id_expr:
+        parts = key_id_expr.split("|", 1)
+        return parts[0].strip(), parts[1].strip()
+    return key_id_expr.strip(), key_id_expr.strip()
+
+
+def register_temporary_tcgttd(goi_thau_id: str, selected_member_names: list[str],
+                               group_name: str, key_id: str, option_key: str = None) -> bool:
+    """
+    Tạo bảng tạm trong DuckDB chứa thành viên được chọn để JOIN query lấy đúng context.
+    - Đọc right_sheet động từ opt_config.
+    - Phân tích key_id dạng 'GoiThau_ID | CCCD' để lấy left_key và right_key.
+    - So khớp dòng dữ liệu qua nhãn hiển thị đầy đủ (đã định nghĩa tại cột Show) tránh trùng lặp.
+    """
+    opt_config = get_option_config(option_key) if option_key else {}
+    left_sheet, right_sheet, join_key = _parse_repeat_sheet_config(opt_config)
+    left_key, right_key = _parse_repeat_key_id(key_id)
+
+    if not right_sheet:
+        print(f"⚠️ register_temporary_tcgttd: không có right_sheet trong option '{option_key}'")
         return False
-        
-    import openpyxl
+
+    member_show_format = ""
+    show_format = opt_config.get("show", "")
+    if "|" in show_format:
+        member_show_format = show_format.split("|", 1)[1].strip()
+
     try:
-        wb = openpyxl.load_workbook(excel_path, read_only=True, data_only=True)
-        if 'S.TCGTTD' not in wb.sheetnames:
-            wb.close()
-            return False
-        ws = wb['S.TCGTTD']
-        package_members = []
-        current_group = None
-        headers = []
-        
-        target_group = "TCG" if "chuyên gia" in group_name.lower() else "TTD"
-        
-        for row in ws.iter_rows(values_only=True):
-            row_str = [str(c).strip() if c is not None else "" for c in row]
-            if not any(row_str):
-                continue
-            row_joined = " ".join(row_str).upper()
-            if "TỔ CHUYÊN GIA" in row_joined:
-                current_group = "TCG"
-                headers = []
-                continue
-            elif "TỔ THẨM ĐỊNH" in row_joined:
-                current_group = "TTD"
-                headers = []
-                continue
-                
-            if current_group == target_group:
-                if "TT" in row_str or "Tên thành viên" in row_str or "Họ và tên" in row_str:
-                    headers = row_str
-                    continue
-                if headers:
-                    name = row_str[1] if len(row_str) > 1 else ""
-                    if name and name.replace(".", "").strip() not in ("", "Tên thành viên", "Họ và tên"):
-                        clean_name = name.strip()
-                        if clean_name in selected_member_names:
-                            package_members.append({
-                                "Tên thành viên": clean_name,
-                                "Chức vụ": row_str[2] if len(row_str) > 2 else "",
-                                "Vị trí": row_str[3] if len(row_str) > 3 else "",
-                                "Phân công công việc": row_str[4] if len(row_str) > 4 else ""
-                            })
-        wb.close()
-        
-        if not package_members:
-            return False
-            
-        df_global = ds.get_table("TCGTTD")
-        if df_global is None or df_global.empty:
-            df_temp = pd.DataFrame(package_members)
-            df_temp[key_id] = goi_thau_id
-            ds.conn.register("TCGTTD", df_temp)
-            return True
-            
-        joined_rows = []
-        for pm in package_members:
-            name = pm["Tên thành viên"]
-            global_match = df_global[df_global["Họ và tên"].str.strip() == name]
-            row_data = {
-                key_id: goi_thau_id,
-                "Họ và tên": name,
-                "Chức vụ": pm["Chức vụ"],
-                "Vị trí": pm["Vị trí"],
-                "Phân công công việc": pm["Phân công công việc"]
-            }
-            if not global_match.empty:
-                g_row = global_match.iloc[0].to_dict()
-                for k, v in g_row.items():
-                    if k not in row_data:
-                        row_data[k] = v
-            else:
-                for col in df_global.columns:
-                    if col not in row_data:
-                        row_data[col] = ""
-            joined_rows.append(row_data)
-            
-        df_temp = pd.DataFrame(joined_rows)
-        ds.conn.register("TCGTTD", df_temp)
-        return True
+        if join_key and goi_thau_id:
+            safe_id = str(goi_thau_id).replace("'", "''")
+            try:
+                all_rows = ds.query(f'SELECT * FROM "{right_sheet}_Goc" WHERE "{join_key}" = \'{safe_id}\'')
+            except Exception:
+                all_rows = ds.query(f'SELECT * FROM "{right_sheet}_Goc"')
+        else:
+            all_rows = ds.query(f'SELECT * FROM "{right_sheet}_Goc"')
     except Exception as e:
-        print(f"❌ Error registering temporary TCGTTD: {e}")
+        print(f"❌ register_temporary_tcgttd query error: {e}")
         return False
+
+    matched = []
+    for r in all_rows:
+        if member_show_format:
+            label = safe_format(member_show_format, {k: _str(v) for k, v in r.items()})
+        else:
+            vals = list(r.values())
+            label = _str(vals[1]) if len(vals) > 1 else ""
+        if label.strip() in selected_member_names:
+            matched.append(dict(r))
+
+    if not matched:
+        print(f"⚠️ register_temporary_tcgttd: không tìm thấy {selected_member_names}")
+        return False
+
+    df_temp = pd.DataFrame(matched)
+    # Gán khóa join_key cho bảng tạm (bảng con) để DuckDB thực hiện JOIN chính xác
+    if join_key and join_key not in df_temp.columns:
+        df_temp[join_key] = goi_thau_id
+    ds.conn.register(right_sheet, df_temp)
+    return True
 
 
 def get_packages(option_key: str) -> list[str]:
@@ -473,7 +458,8 @@ def get_packages(option_key: str) -> list[str]:
         show_format = show_format.split("|")[0].strip()
     
     if opt_config.get("type") == "Repeat":
-        sql = 'SELECT * FROM "GoiThau"'
+        ls, _, _ = _parse_repeat_sheet_config(opt_config)
+        sql = f'SELECT * FROM "{ls}"' if ls else resolve_sheet_query(sheet)
     else:
         sql = resolve_sheet_query(sheet)
     try:
@@ -497,8 +483,6 @@ def get_package_details(option_key: str, package_label: str, sheet_rows: list[di
         return {}
     opt_config = get_option_config(option_key)
     show_format = opt_config.get("show", "")
-    if "|" in show_format:
-        show_format = show_format.split("|", 1)[0].strip()
 
     if sheet_rows is not None:
         rows = sheet_rows
@@ -537,9 +521,7 @@ def get_workflow_templates(option_key: str, package_label: str, sheet_rows: list
     opt_config = get_option_config(option_key)
     key_id = opt_config.get("key_id", "ID")
     show_format = opt_config.get("show", "")
-    if "|" in show_format:
-        show_format = show_format.split("|", 1)[0].strip()
-
+    
     if sheet_rows is not None:
         main_rows = sheet_rows
     else:
@@ -566,16 +548,13 @@ def get_workflow_templates(option_key: str, package_label: str, sheet_rows: list
     for r in wf_rows:
         condition_str = _str(r.get("Condition", ""))
         if not condition_str:
-            price = _parse_price(selected_pkg.get("Giá gói thầu", 0))
-            goi_thau_loai = _str(selected_pkg.get("GoiThau_Loai"))
+            # Không có Condition → luôn đưa vào (bỏ lọc Type/GoiThau_Loai)
             pmin = _parse_price(r.get("Price", 0))
             pmax = _parse_price(r.get("PriceMax", 0))
+            price = _parse_price(selected_pkg.get("Giá gói thầu", 0))
             if pmin is not None and pmax is not None and price is not None:
                 if not (pmin <= price <= pmax):
                     continue
-            rtype = _str(r.get("Type"))
-            if rtype != "ALL" and rtype != goi_thau_loai:
-                continue
             filtered.append(r)
         else:
             if check_condition(condition_str, selected_pkg, config_mappings):
@@ -619,8 +598,6 @@ def run_preview(option_key: str, package_label: str,
     sheet = opt_config.get("sheet", "GoiThau")
     key_id = opt_config.get("key_id", "ID")
     show_format = opt_config.get("show", "")
-    if "|" in show_format:
-        show_format = show_format.split("|", 1)[0].strip()
 
     sql = resolve_sheet_query(sheet)
     goi_thau_rows = ds.query(sql)
@@ -674,7 +651,7 @@ def run_preview(option_key: str, package_label: str,
     # Tìm các dòng Tables liên quan đến template đang chọn
     xlsx_files = sorted(config.data_path.glob("*.xlsx"))
     danh_muc_file = next(
-        (f for f in xlsx_files if "DanhMuc" in f.stem or "danh muc" in f.stem.lower()),
+        (f for f in xlsx_files if config.DanhMucFile.lower() in f.stem.lower()),
         xlsx_files[0] if xlsx_files else None
     )
 
@@ -688,7 +665,7 @@ def run_preview(option_key: str, package_label: str,
 
     table_lines = []
     for t in tables_rows:
-        t_id = t.get(key_id) if key_id in t else t.get("GoiThau_ID")
+        t_id = t.get(key_id)
         if _str(t_id) != goi_thau_id:
             continue
         name     = _str(t.get("Name", ""))
@@ -824,10 +801,11 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
     sheet = opt_config.get("sheet", "GoiThau")
     key_id = opt_config.get("key_id", "ID")
     show_format = opt_config.get("show", "")
-    if "|" in show_format:
-        show_format = show_format.split("|", 1)[0].strip()
+
+    # Query initial package to get goi_thau_id
     if opt_config.get("type") == "Repeat":
-        temp_sql = 'SELECT * FROM "GoiThau"'
+        ls, _, _ = _parse_repeat_sheet_config(opt_config)
+        temp_sql = f'SELECT * FROM "{ls}"' if ls else resolve_sheet_query(sheet)
     else:
         temp_sql = resolve_sheet_query(sheet)
     temp_rows = ds.query(temp_sql)
@@ -839,16 +817,17 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
     if not selected_pkg_initial:
         yield "", "❌ Không tìm thấy dòng dữ liệu tương ứng", None
         return
-    goi_thau_id = _str(selected_pkg_initial.get(key_id))
+    left_key, right_key = _parse_repeat_key_id(key_id)
+    goi_thau_id = _str(selected_pkg_initial.get(left_key))
 
     sql = resolve_sheet_query(sheet)
 
     if opt_config.get("type") == "Repeat":
         templates = get_workflow_templates(option_key, package_label, sheet_rows=temp_rows)
-        target_word = "Cam ket TCG" if "chuyên gia" in group_name.lower() else "Cam ket TTD"
-        matched_tpl = next((t for t in templates if target_word in str(t.get("File", ""))), None)
+        # Khớp group_name trực tiếp với cột Name trong Workflow
+        matched_tpl = next((t for t in templates if _str(t.get("Name")) == group_name), None)
         if not matched_tpl:
-            yield "", f"❌ Không tìm thấy template cho {group_name}", None
+            yield "", f"❌ Không tìm thấy template cho '{group_name}'", None
             return
 
         fname_raw = _str(matched_tpl.get("File", ""))
@@ -866,7 +845,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
 
         xlsx_files = sorted(config.data_path.glob("*.xlsx"))
         danh_muc_file = next(
-            (f for f in xlsx_files if "DanhMuc" in f.stem or "danh muc" in f.stem.lower()),
+            (f for f in xlsx_files if config.DanhMucFile.lower() in f.stem.lower()),
             xlsx_files[0] if xlsx_files else None
         )
 
@@ -883,7 +862,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
                 progress((i + 1) / len(selected_templates), desc=f"Đang xử lý thành viên: {member_name}")
 
             try:
-                register_temporary_tcgttd(goi_thau_id, [member_name], group_name, key_id)
+                register_temporary_tcgttd(goi_thau_id, [member_name], group_name, key_id, option_key)
 
                 joined_rows = ds.query(sql)
                 if not joined_rows:
@@ -910,11 +889,16 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
                         raw_value = ""
                     context[clean_key] = str(raw_value)
 
-                context["HoTen"] = member_name
-                context["Ho_va_ten"] = member_name
-                context["ChucVu"] = member_pkg_row.get("Chức vụ", "")
-                context["ViTri"] = member_pkg_row.get("Vị trí", "")
-                context["PhanCong"] = member_pkg_row.get("Phân công công việc", "")
+                # Trích xuất tên cột động từ phần bên phải của cột Show (sau dấu |)
+                member_col = "Họ và tên"
+                if "|" in show_format:
+                    right_format = show_format.split("|", 1)[1]
+                    matches = re.findall(r"\{([^}]+)\}", right_format)
+                    if matches:
+                        member_col = matches[0].strip()
+
+                context["HoTen"] = _str(member_pkg_row.get(member_col, member_name))
+                context["Ho_va_ten"] = context["HoTen"]
 
                 nested_context = make_nested_dict(context)
                 nested_context["now"] = datetime.now()
@@ -995,7 +979,8 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
         yield "", "❌ Không tìm thấy dòng dữ liệu tương ứng", None
         return
 
-    goi_thau_id = _str(selected_pkg.get(key_id))
+    left_key, right_key = _parse_repeat_key_id(key_id)
+    goi_thau_id = _str(selected_pkg.get(left_key))
     config_rows = get_config_for_option(option_key)
 
     try:
@@ -1031,7 +1016,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
 
     xlsx_files = sorted(config.data_path.glob("*.xlsx"))
     danh_muc_file = next(
-        (f for f in xlsx_files if "DanhMuc" in f.stem or "danh muc" in f.stem.lower()),
+        (f for f in xlsx_files if config.DanhMucFile.lower() in f.stem.lower()),
         xlsx_files[0] if xlsx_files else None
     )
 
@@ -1102,7 +1087,7 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
     table_placeholder_names = {
         _str(t.get("Name", "")).strip("{} ")
         for t in tables_rows
-        if _str(t.get(key_id) if key_id in t else t.get("GoiThau_ID")) == goi_thau_id
+        if _str(t.get(key_id)) == goi_thau_id
     }
 
     for i, (src_path, tpl_name) in enumerate(zip(copied, template_names)):
@@ -1446,7 +1431,8 @@ def create_ui():
             if opt_config.get("type") == "Repeat":
                 sheet_rows = _sel["sheet_rows"]
                 details = get_package_details(opt, pkg, sheet_rows)
-                goi_thau_id = details.get(opt_config.get("key_id", "ID"), "")
+                lk, _ = _parse_repeat_key_id(opt_config.get("key_id", "ID"))
+                goi_thau_id = details.get(lk, "")
                 members = get_repeat_members(goi_thau_id, group, opt)
                 return gr.update(value=members)
             else:
@@ -1466,14 +1452,15 @@ def create_ui():
                 # For repeat, register temporary table before previewing
                 sheet_rows = _sel["sheet_rows"]
                 details = get_package_details(opt, pkg, sheet_rows)
-                goi_thau_id = details.get(opt_config.get("key_id", "ID"), "")
+                lk, _ = _parse_repeat_key_id(opt_config.get("key_id", "ID"))
+                goi_thau_id = details.get(lk, "")
                 # Create and register temporary table
-                register_temporary_tcgttd(goi_thau_id, selected, group, opt_config.get("key_id", "ID"))
+                register_temporary_tcgttd(goi_thau_id, selected, group, opt_config.get("key_id", "ID"), opt)
                 # Get the template names to pass to run_preview
                 templates = get_workflow_templates(opt, pkg, sheet_rows)
                 # Filter template depending on group
-                target_word = "Cam ket TCG" if "chuyên gia" in group.lower() else "Cam ket TTD"
-                selected_tpls = [t.get("Name", "") for t in templates if target_word in str(t.get("File", ""))]
+                target_tpl_names = {_str(t.get("Name")) for t in templates if _str(t.get("Name")) == group}
+                selected_tpls = list(target_tpl_names)
                 result = run_preview(opt, pkg, selected_tpls)
                 return gr.update(value=result, visible=True)
             else:
@@ -1639,6 +1626,6 @@ if __name__ == "__main__":
         except OSError:
             PORT += 1
 
-    threading.Thread(target=lambda: webbrowser.open(f"http://127.0.0.1:{PORT}"), daemon=True).start()
+    # threading.Thread(target=lambda: webbrowser.open(f"http://127.0.0.1:{PORT}"), daemon=True).start()
     print(f"KisorDoc-AI running at http://127.0.0.1:{PORT}")
     app.launch(server_port=PORT, share=False, quiet=True, inbrowser=False)

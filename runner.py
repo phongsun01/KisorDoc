@@ -76,11 +76,11 @@ def main():
     )
     t_api.start()
 
-    # Mở trình duyệt sau 2 giây (đủ thời gian Gradio khởi động)
-    threading.Thread(
-        target=lambda: (time.sleep(2), webbrowser.open(f"http://127.0.0.1:{gradio_port}")),
-        daemon=True,
-    ).start()
+    # Mở trình duyệt sau 2 giây (đủ thời gian Gradio khởi động) - Đã tắt để tránh spam tab
+    # threading.Thread(
+    #     target=lambda: (time.sleep(2), webbrowser.open(f"http://127.0.0.1:{gradio_port}")),
+    #     daemon=True,
+    # ).start()
 
     # Start Gradio trong main thread (blocking)
     try:

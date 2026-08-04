@@ -3,19 +3,17 @@
 ## [3.2.2] - 2026-08-04
 
 ### Added
-- **Repeat Mode hoàn toàn động:** `get_repeat_members` được viết lại để đọc tên sheet thành viên (`right_sheet`) và khóa join (`join_key`) trực tiếp từ cấu hình cột `Sheet` trong Options (cú pháp `GoiThau * TCGTTD @ GoiThau_ID`), không còn hardcode tên sheet.
-- **Format thành viên từ cột Show:** Checkbox Group hiển thị nhãn thành viên theo phần sau dấu `|` trong cột `Show` (ví dụ: `{Họ và tên} - {CCCD}`), query từ DuckDB thay vì đọc file Excel thủ công bằng openpyxl.
-- **Fallback khi thiếu cột join:** Nếu cột `GoiThau_ID` không tồn tại trong sheet thành viên, tự động lấy toàn bộ dữ liệu (không lọc).
-- **Choices group_radio lọc theo Condition:** Khi chọn gói thầu, danh sách nhóm lặp (Radio) được lọc qua `get_workflow_templates()` (có xử lý cột `Condition`), không còn load thô toàn bộ Workflow.
+- **Động hóa hoàn toàn cấu hình `KeyId` ghép `|` cho chế độ Repeat:** Hỗ trợ cấu hình `KeyId` dạng ghép bằng dấu `|` (Ví dụ: `GoiThau_ID | CCCD`), tự động phân tách thành `left_key` (khóa bảng chính) và `right_key` (khóa bảng con) để JOIN query chính xác tuyệt đối, tránh trùng lặp họ tên thành viên khi xử lý lặp.
+- **Trích xuất tên cột Họ tên động từ cột `Show`:** Thay vì gán cứng `"Họ và tên"`, chương trình tự động trích xuất tên cột định danh thành viên từ phần bên phải của cột `Show` (sau dấu `|`) để đưa giá trị chuẩn vào file template Word.
+- **Nhân bản bảng DuckDB tránh ghi đè dữ liệu gốc:** Tự động tạo bản sao dự phòng `_Goc` cho toàn bộ các bảng trong DuckDB khi khởi động, giúp các quy trình xử lý lặp song song hoặc tuần lặp không bị ghi đè hay mất dữ liệu gốc của sheet Excel.
 
-### Fixed
-- Sửa lỗi `| -` thừa ở bên trái dropdown "Chọn dữ liệu": normalize `show_format` lấy phần trước `|` ở tất cả các hàm `get_package_details`, `get_workflow_templates`, `check_package`, `run_batch`.
-- Sửa lỗi `UnboundLocalError: right_sheet not associated with a value` khi gọi `get_repeat_members` mà không truyền `option_key`.
-- Sửa lỗi `ValueError: function didn't return enough output values (needed: 11, returned: 10)` trong `on_package_change` — thêm đủ phần tử `group_radio` vào tất cả các `return` tuple.
-- `select_all` truyền `option_key` vào `get_repeat_members` để đọc đúng sheet cấu hình.
+### Changed
+- **Default Show Format an toàn:** Chuyển giá trị mặc định của `show` trong `get_option_config` khi không có cấu hình thành `"{TT}"` thay vì hardcode cột của gói thầu cụ thể.
+- **Động hóa `left_sheet` cho Repeat:** Cập nhật `get_packages` để truy xuất bảng chính thông qua `left_sheet` lấy từ cột `Sheet` trong Options thay vì cứng nhắc `"GoiThau"`.
+- **Động hóa `DANH_MUC_FILE` từ `.env`:** Di chuyển cấu hình tên file Danh Mục dự án thành biến môi trường `DANH_MUC_FILE` để thuận tiện tùy biến.
+- **Vô hiệu hóa tự động bật trình duyệt web:** Tắt cơ chế tự động gọi `webbrowser.open` tại `runner.py` và `app.py` khi khởi động/nạp lại code để tránh mở tab rác trên trình duyệt của người dùng.
 
 ## [3.2.1] - 2026-08-03
-
 
 ### Changed
 - **Tái cấu trúc thư viện dùng chung (Patch-v8):** Di chuyển các class/hàm helper `NestedVal` và `make_nested_dict` từ `app.py` vào module dùng chung `kisorlib/app_helpers.py` để cả `app.py` và `engine.py` cùng chia sẻ, giảm thiểu trùng lặp mã và tăng độ ổn định của hệ thống.
