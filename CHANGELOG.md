@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.2.3] - 2026-08-04
+
+### Fixed
+- **Tương thích hoàn toàn parser cho Join Expression:** Viết lại hàm `_parse_repeat_sheet_config` sử dụng cùng bảng ánh xạ toán tử `_OP_MAP` với `parse_join_expression`. Fix triệt để lỗi phân tích sai tên sheet trái/phải (`left_sheet`, `right_sheet`) đối với các cú pháp join phức tạp như `<*>`, `<*`, `*>`, `*`.
+- **An toàn hóa contract write_with_retry:** Chuẩn hóa kiểu trả về của hàm `write_with_retry` luôn trả về tuple `(bool, str)`. Ngăn chặn hoàn toàn lỗi runtime `TypeError: cannot unpack non-iterable` khi hàm con bên trong không trả về tuple (ví dụ: `do_copy` trả về `None`).
+- **Khắc phục stale data trong chế độ Repeat:** Thêm guard clause kiểm tra kết quả trả về của hàm `register_temporary_tcgttd` trước khi thực hiện câu lệnh SQL chính. Bỏ qua và ghi log `SKIP` cho thành viên bị lỗi thay vì truy vấn đè lên dữ liệu cũ của thành viên trước đó.
+- **Đồng bộ split KeyId:** Cập nhật các hàm thay đổi dữ liệu trên giao diện (`on_package_change`, `on_group_change`) để phân tách KeyId thông qua `_parse_repeat_key_id` trước khi truy xuất giá trị từ dict, sửa lỗi lấy rỗng `goi_thau_id` khi cấu hình KeyId dạng ghép.
+- **Loại bỏ triệt để hardcode còn lại:** Chuyển đổi toàn bộ các fallback gán cứng tên sheet `"GoiThau"`, tên cột `"ID"`, dạng show `"{TT}"` sang sử dụng giá trị cấu hình tương ứng trong `AppConfig` (`config.DataSheet`, `config.DefaultKeyId`, `config.DefaultShow`). Giao diện chọn nhóm lặp cũng được động hóa không còn cứng `"Tổ chuyên gia" / "Tổ thẩm định"`.
+
 ## [3.2.2] - 2026-08-04
 
 ### Added
