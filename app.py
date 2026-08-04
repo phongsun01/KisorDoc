@@ -1329,7 +1329,8 @@ def create_ui():
 
             opt_config = get_option_config(opt)
             if opt_config.get("type") == "Repeat":
-                goi_thau_id = details.get(opt_config.get("key_id", "ID"), "")
+                lk, _ = _parse_repeat_key_id(opt_config.get("key_id", config.DefaultKeyId))
+                goi_thau_id = details.get(lk, "")
                 members = get_repeat_members(goi_thau_id, group, opt)
                 # Lấy choices group_radio có lọc Condition theo gói thầu đang chọn
                 wf_filtered = get_workflow_templates(opt, pkg, sheet_rows)
@@ -1384,7 +1385,8 @@ def create_ui():
             if opt_config.get("type") == "Repeat":
                 sheet_rows = _sel["sheet_rows"]
                 details = get_package_details(opt, pkg, sheet_rows)
-                goi_thau_id = details.get(opt_config.get("key_id", "ID"), "")
+                lk, _ = _parse_repeat_key_id(opt_config.get("key_id", config.DefaultKeyId))
+                goi_thau_id = details.get(lk, "")
                 members = get_repeat_members(goi_thau_id, group, opt)
                 _sel["template_total"] = len(members)
                 label_text = f"**{ui_labels.get('repeat_member_title', 'Chọn Đối tượng lặp cần xử lý')}** ({len(members)} người)"
@@ -1472,7 +1474,7 @@ def create_ui():
             if opt_config.get("type") == "Repeat":
                 sheet_rows = _sel["sheet_rows"]
                 details = get_package_details(opt, pkg, sheet_rows)
-                lk, _ = _parse_repeat_key_id(opt_config.get("key_id", "ID"))
+                lk, _ = _parse_repeat_key_id(opt_config.get("key_id", config.DefaultKeyId))
                 goi_thau_id = details.get(lk, "")
                 members = get_repeat_members(goi_thau_id, group, opt)
                 return gr.update(value=members)
@@ -1493,10 +1495,10 @@ def create_ui():
                 # For repeat, register temporary table before previewing
                 sheet_rows = _sel["sheet_rows"]
                 details = get_package_details(opt, pkg, sheet_rows)
-                lk, _ = _parse_repeat_key_id(opt_config.get("key_id", "ID"))
+                lk, _ = _parse_repeat_key_id(opt_config.get("key_id", config.DefaultKeyId))
                 goi_thau_id = details.get(lk, "")
                 # Create and register temporary table
-                register_temporary_tcgttd(goi_thau_id, selected, group, opt_config.get("key_id", "ID"), opt)
+                register_temporary_tcgttd(goi_thau_id, selected, group, opt_config.get("key_id", config.DefaultKeyId), opt)
                 # Get the template names to pass to run_preview
                 templates = get_workflow_templates(opt, pkg, sheet_rows)
                 # Filter template depending on group
