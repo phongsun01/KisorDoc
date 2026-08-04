@@ -306,52 +306,71 @@ def get_package_excel_file(goi_thau_id: str) -> Path | None:
     return None
 
 
-def get_repeat_members(goi_thau_id: str, group_type: str) -> list[str]:
-    excel_path = get_package_excel_file(goi_thau_id)
-    if not excel_path:
-        print(f"⚠️ Could not find excel path for package: {goi_thau_id}")
+def _parse_repeat_sheet_config(opt_config: dict) -> tuple[str, str, str]:
+    """
+    Phân tích cột Sheet dạng: 'GoiThau * TCGTTD @ GoiThau_ID'
+    Trả về (left_sheet, right_sheet, join_key).
+    Nếu không có ký hiệu * hoặc @, trả về (sheet, "", "").
+    """
+    sheet_expr = opt_config.get("sheet", "")
+    if "*" not in sheet_expr:
+        return sheet_expr, "", ""
+    left_part, right_part = sheet_expr.split("*", 1)
+    left_sheet = left_part.strip()
+    if "@" in right_part:
+        right_sheet, join_key = right_part.split("@", 1)
+    else:
+        right_sheet = right_part
+        join_key = ""
+    return left_sheet.strip(), right_sheet.strip(), join_key.strip()
+
+
+def get_repeat_members(goi_thau_id: str, group_type: str, option_key: str = None) -> list[str]:
+    """
+    Lấy danh sách thành viên lặp từ sheet phụ (phần phải cột Sheet).
+    - Đọc cấu hình sheet từ opt_config (không hardcode tên sheet).
+    - Query DuckDB với điều kiện join_key = goi_thau_id.
+    - Format hiển thị theo phần phải của cột Show (sau dấu '|').
+    """
+    member_show_format = ""
+    left_sheet = right_sheet = join_key = ""
+    if option_key:
+        opt_config = get_option_config(option_key)
+        show_format = opt_config.get("show", "")
+        if "|" in show_format:
+            member_show_format = show_format.split("|", 1)[1].strip()
+        left_sheet, right_sheet, join_key = _parse_repeat_sheet_config(opt_config)
+
+    if not right_sheet:
+        print(f"⚠️ get_repeat_members: không có right_sheet trong option '{option_key}'")
         return []
-    
-    import openpyxl
+
     try:
-        wb = openpyxl.load_workbook(excel_path, read_only=True, data_only=True)
-        if 'S.TCGTTD' not in wb.sheetnames:
-            wb.close()
-            return []
-        ws = wb['S.TCGTTD']
-        members = []
-        current_group = None
-        headers = []
-        
-        target_group = "TCG" if "chuyên gia" in group_type.lower() else "TTD"
-        
-        for row in ws.iter_rows(values_only=True):
-            row_str = [str(c).strip() if c is not None else "" for c in row]
-            if not any(row_str):
-                continue
-            row_joined = " ".join(row_str).upper()
-            if "TỔ CHUYÊN GIA" in row_joined:
-                current_group = "TCG"
-                headers = []
-                continue
-            elif "TỔ THẨM ĐỊNH" in row_joined:
-                current_group = "TTD"
-                headers = []
-                continue
-                
-            if current_group == target_group:
-                if "TT" in row_str or "Tên thành viên" in row_str or "Họ và tên" in row_str:
-                    headers = row_str
-                    continue
-                if headers:
-                    name = row_str[1] if len(row_str) > 1 else ""
-                    if name and name.replace(".", "").strip() not in ("", "Tên thành viên", "Họ và tên"):
-                        members.append(name.strip())
-        wb.close()
-        return members
+        if join_key and goi_thau_id:
+            safe_id = str(goi_thau_id).replace("'", "''")
+            try:
+                rows = ds.query(f'SELECT * FROM "{right_sheet}" WHERE "{join_key}" = \'{safe_id}\'')
+            except Exception:
+                # Cột join_key không tồn tại trong sheet → lấy toàn bộ
+                rows = ds.query(f'SELECT * FROM "{right_sheet}"')
+        else:
+            rows = ds.query(f'SELECT * FROM "{right_sheet}"')
     except Exception as e:
-        print(f"❌ Error reading members: {e}")
+        print(f"❌ get_repeat_members query error: {e}")
         return []
+
+    members = []
+    for r in rows:
+        if member_show_format:
+            label = safe_format(member_show_format, {k: _str(v) for k, v in r.items()})
+            if label.strip():
+                members.append(label.strip())
+        else:
+            vals = list(r.values())
+            name = _str(vals[1]) if len(vals) > 1 else ""
+            if name:
+                members.append(name)
+    return members
 
 
 def register_temporary_tcgttd(goi_thau_id: str, selected_member_names: list[str], group_name: str, key_id: str) -> bool:
@@ -450,6 +469,8 @@ def get_packages(option_key: str) -> list[str]:
     opt_config = get_option_config(option_key)
     sheet = opt_config.get("sheet", "GoiThau")
     show_format = opt_config.get("show", "")
+    if "|" in show_format:
+        show_format = show_format.split("|")[0].strip()
     
     if opt_config.get("type") == "Repeat":
         sql = 'SELECT * FROM "GoiThau"'
@@ -476,6 +497,8 @@ def get_package_details(option_key: str, package_label: str, sheet_rows: list[di
         return {}
     opt_config = get_option_config(option_key)
     show_format = opt_config.get("show", "")
+    if "|" in show_format:
+        show_format = show_format.split("|", 1)[0].strip()
 
     if sheet_rows is not None:
         rows = sheet_rows
@@ -514,7 +537,9 @@ def get_workflow_templates(option_key: str, package_label: str, sheet_rows: list
     opt_config = get_option_config(option_key)
     key_id = opt_config.get("key_id", "ID")
     show_format = opt_config.get("show", "")
-    
+    if "|" in show_format:
+        show_format = show_format.split("|", 1)[0].strip()
+
     if sheet_rows is not None:
         main_rows = sheet_rows
     else:
@@ -594,6 +619,8 @@ def run_preview(option_key: str, package_label: str,
     sheet = opt_config.get("sheet", "GoiThau")
     key_id = opt_config.get("key_id", "ID")
     show_format = opt_config.get("show", "")
+    if "|" in show_format:
+        show_format = show_format.split("|", 1)[0].strip()
 
     sql = resolve_sheet_query(sheet)
     goi_thau_rows = ds.query(sql)
@@ -797,8 +824,8 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
     sheet = opt_config.get("sheet", "GoiThau")
     key_id = opt_config.get("key_id", "ID")
     show_format = opt_config.get("show", "")
-
-    # Query initial package to get goi_thau_id
+    if "|" in show_format:
+        show_format = show_format.split("|", 1)[0].strip()
     if opt_config.get("type") == "Repeat":
         temp_sql = 'SELECT * FROM "GoiThau"'
     else:
@@ -1210,7 +1237,7 @@ def create_ui():
                         options = get_options()
                         option_radio = gr.Radio(choices=options, label=ui_labels.get("workflow_section", "Chọn Quy trình"))
                         package_radio = gr.Radio(choices=[], label=ui_labels.get("package_section", "Chọn Dữ liệu"))
-                        group_radio = gr.Radio(choices=["Tổ chuyên gia", "Tổ thẩm định"], label="Chọn nhóm nhân sự (Tổ chuyên gia/Tổ thẩm định)", visible=False, value="Tổ chuyên gia")
+                        group_radio = gr.Radio(choices=ui_labels.get("repeat_group_choices", ["Tổ chuyên gia", "Tổ thẩm định"]), label=ui_labels.get("repeat_group_title", "Chọn Nhóm lặp"), visible=False, value=ui_labels.get("repeat_group_choices", ["Tổ chuyên gia", "Tổ thẩm định"])[0] if ui_labels.get("repeat_group_choices") else "Tổ chuyên gia")
 
                         with gr.Group():
                             gr.Markdown("**" + ui_labels.get("preview_section", "Preview thông tin:") + "**")
@@ -1218,7 +1245,7 @@ def create_ui():
 
                     with gr.Column(scale=1) as template_col:
                         gr.Markdown("### " + ui_labels.get("template_section", "Chọn file template & Chạy"))
-                        template_label = gr.Markdown("**Chọn template cần xử lý** (0 file)", visible=True)
+                        template_label = gr.Markdown(f'**{ui_labels.get("template_section", "Chọn file template & Chạy")}** (0 file)', visible=True)
                         template_checkboxes = gr.CheckboxGroup(label="", choices=[], visible=True)
 
                         with gr.Row():
@@ -1275,15 +1302,19 @@ def create_ui():
                     gr.update(visible=True),
                     gr.update(visible=True),
                     gr.update(visible=True),
-                    gr.update(visible=True)
+                    gr.update(visible=True),
+                    gr.update()  # group_radio
                 )
 
             opt_config = get_option_config(opt)
             if opt_config.get("type") == "Repeat":
                 goi_thau_id = details.get(opt_config.get("key_id", "ID"), "")
-                members = get_repeat_members(goi_thau_id, group)
+                members = get_repeat_members(goi_thau_id, group, opt)
+                # Lấy choices group_radio có lọc Condition theo gói thầu đang chọn
+                wf_filtered = get_workflow_templates(opt, pkg, sheet_rows)
+                group_choices = [_str(r.get("Name")) for r in wf_filtered if _str(r.get("Name"))]
                 _sel["template_total"] = len(members)
-                label_text = f"**Chọn thành viên cần xuất cam kết** ({len(members)} người)"
+                label_text = f"**{ui_labels.get('repeat_member_title', 'Chọn Đối tượng lặp cần xử lý')}** ({len(members)} người)"
                 _sel["pkg"] = pkg
                 return (
                     preview_text,
@@ -1295,7 +1326,8 @@ def create_ui():
                     gr.update(visible=True),
                     gr.update(visible=True),
                     gr.update(visible=True),
-                    gr.update(visible=True)
+                    gr.update(visible=True),
+                    gr.update(choices=group_choices, value=group_choices[0] if group_choices else None, visible=True)
                 )
             else:
                 templates = get_workflow_templates(opt, pkg, sheet_rows)
@@ -1313,13 +1345,14 @@ def create_ui():
                     gr.update(visible=True),
                     gr.update(visible=True),
                     gr.update(visible=True),
-                    gr.update(visible=True)
+                    gr.update(visible=True),
+                    gr.update()  # group_radio — giữ nguyên
                 )
 
         package_radio.change(
             fn=on_package_change,
             inputs=[package_radio, group_radio],
-            outputs=[pkg_preview, template_checkboxes, template_label, last_run_state, retry_btn, preview_box, select_all_btn, deselect_all_btn, run_btn, check_btn]
+            outputs=[pkg_preview, template_checkboxes, template_label, last_run_state, retry_btn, preview_box, select_all_btn, deselect_all_btn, run_btn, check_btn, group_radio]
         )
 
         def on_group_change(group, pkg):
@@ -1331,9 +1364,9 @@ def create_ui():
                 sheet_rows = _sel["sheet_rows"]
                 details = get_package_details(opt, pkg, sheet_rows)
                 goi_thau_id = details.get(opt_config.get("key_id", "ID"), "")
-                members = get_repeat_members(goi_thau_id, group)
+                members = get_repeat_members(goi_thau_id, group, opt)
                 _sel["template_total"] = len(members)
-                label_text = f"**Chọn thành viên cần xuất cam kết** ({len(members)} người)"
+                label_text = f"**{ui_labels.get('repeat_member_title', 'Chọn Đối tượng lặp cần xử lý')}** ({len(members)} người)"
                 return gr.update(choices=members, value=[]), gr.update(value=label_text)
             return gr.update(), gr.update()
 
@@ -1350,17 +1383,23 @@ def create_ui():
             all_tpls = get_all_option_templates(opt)
             if not opt:
                 pkgs = []
-                show_group = gr.update(visible=False, value="Tổ chuyên gia")
+                show_group = gr.update(visible=False, choices=[])
             else:
                 opt_config = get_option_config(opt)
                 sheet = opt_config.get("sheet", "GoiThau")
                 show_format = opt_config.get("show", "")
                 if opt_config.get("type") == "Repeat":
                     sql = 'SELECT * FROM "GoiThau"'
-                    show_group = gr.update(visible=True, value="Tổ chuyên gia")
+                    opt_code = opt.split(":")[0].strip() if ":" in opt else opt.strip()
+                    try:
+                        wf_rows = ds.query(f"SELECT DISTINCT Name FROM Workflow WHERE Option = '{opt_code}'")
+                        group_choices = [str(r["Name"]).strip() for r in wf_rows if r.get("Name")]
+                    except Exception:
+                        group_choices = ["Tổ chuyên gia", "Tổ thẩm định"]
+                    show_group = gr.update(choices=group_choices, visible=True, value=group_choices[0] if group_choices else None)
                 else:
                     sql = resolve_sheet_query(sheet)
-                    show_group = gr.update(visible=False, value="Tổ chuyên gia")
+                    show_group = gr.update(visible=False)
                 try:
                     rows = ds.query(f"SELECT * FROM ({sql}) ORDER BY CAST(TT AS INTEGER)")
                 except Exception:
@@ -1394,7 +1433,7 @@ def create_ui():
             if opt:
                 opt_config = get_option_config(opt)
                 if opt_config.get("type") == "Repeat":
-                    return gr.update(value=f"**Chọn thành viên cần xuất cam kết** ({count}/{total} người)")
+                    return gr.update(value=f"**{ui_labels.get('repeat_member_title', 'Chọn Đối tượng lặp cần xử lý')}** ({count}/{total} người)")
             return gr.update(value=f"**Chọn template cần xử lý** ({count}/{total} file)")
 
         template_checkboxes.change(fn=update_checkbox_label, inputs=[template_checkboxes], outputs=[template_label])
@@ -1408,7 +1447,7 @@ def create_ui():
                 sheet_rows = _sel["sheet_rows"]
                 details = get_package_details(opt, pkg, sheet_rows)
                 goi_thau_id = details.get(opt_config.get("key_id", "ID"), "")
-                members = get_repeat_members(goi_thau_id, group)
+                members = get_repeat_members(goi_thau_id, group, opt)
                 return gr.update(value=members)
             else:
                 templates = get_workflow_templates(opt, pkg, _sel["sheet_rows"])
@@ -1571,7 +1610,7 @@ def create_ui():
                 gr.update(value=""),
                 gr.update(selected=0),
                 None,
-                gr.update(visible=False, value="Tổ chuyên gia"),
+                gr.update(visible=False, value=ui_labels.get("repeat_group_choices", ["Tổ chuyên gia"])[0] if ui_labels.get("repeat_group_choices") else "Tổ chuyên gia"),
                 gr.update(visible=True),
                 gr.update(visible=True),
                 gr.update(visible=True),

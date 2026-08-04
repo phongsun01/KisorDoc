@@ -12,5 +12,8 @@
   "rerun_btn": "← Quay lại",
   "logs_tab": "2. Log & Kết quả",
   "open_folder_btn": "📂 Mở thư mục output",
-  "open_logs_btn": "📋 Mở thư mục log"
+  "open_logs_btn": "📋 Mở thư mục log",
+  "repeat_group_title": "Chọn Nhóm lặp",
+  "repeat_member_title": "Chọn Đối tượng lặp cần xử lý",
+  "repeat_group_default": "Nhóm đối tượng"
 }
