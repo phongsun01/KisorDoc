@@ -1,7 +1,8 @@
 # PRD – Word Batch Processor (KisorDoc-AI)
-**Phiên bản:** 3.0  
-**Ngày:** 2026-07-31  
-**Trạng thái:** Production Ready (ver2.1.0)
+**Phiên bản:** 3.2.2  
+**Ngày:** 2026-08-04  
+**Trạng thái:** Production Ready (ver3.2.2)
+
 
 ---
 
@@ -65,6 +66,7 @@ File JSON đặt tại `%LOCALAPPDATA%\UiPathProjectConfigs\Config-5.txt`:
 | `AgentPath` | `C:\FPT\EGP-AGENT\egp-edoc-agent.exe` | (Không dùng trong Python) |
 | `ExceptionSheet` | `S.` | Tiền tố sheet bị loại khỏi DataSet |
 | `AppName` | `KisorDoc-AI` | Tên ứng dụng hiển thị trên UI |
+| `DANH_MUC_FILE` | `DanhMuc` | Tên file danh mục dự án động (sử dụng thay thế so khớp cứng) |
 
 ---
 
@@ -109,6 +111,16 @@ Khi bắt đầu, tool quét **tất cả file `.xlsx`** trong thư mục Data v
 | `KeyId` | GoiThau_ID | Cột khoá chính duy nhất của dữ liệu (mặc định là `ID` nếu trống) |
 | `Config` | 2-97 | Vùng dòng trong sheet Config thuộc về Option này (để trống = đọc toàn bộ sheet) |
 | `Type` | Repeat | Loại quy trình. Nếu là `Repeat` thì hiểu là chạy loop nhiều dòng (ví dụ thành viên) cho 1 template. |
+
+#### Cấu hình nâng cao trong chế độ Repeat:
+1. **Khớp nối Sheet (Join sheet):** Cột `Sheet` trong Options hỗ trợ biểu thức kết hợp bảng dạng `LeftSheet * RightSheet @ JoinKey` (Ví dụ: `GoiThau * TCGTTD @ GoiThau_ID`).
+   - `LeftSheet` (ví dụ `GoiThau`): Chứa thông tin chung của gói thầu.
+   - `RightSheet` (ví dụ `TCGTTD`): Chứa danh sách thành viên/đối tượng lặp.
+   - `JoinKey` (ví dụ `GoiThau_ID`): Khóa liên kết dữ liệu giữa hai bảng.
+2. **Khóa chính ghép (Composite KeyId):** Cột `KeyId` hỗ trợ dạng ghép bằng dấu `|` (Ví dụ: `GoiThau_ID | CCCD`) để định vị chính xác khóa bảng chính (`left_key` như `GoiThau_ID`) và khóa bảng con (`right_key` như `CCCD`), giúp tránh lỗi trùng họ tên thành viên khi lặp.
+3. **Hiển thị nhãn (Composite Show):** Cột `Show` hỗ trợ dạng ghép bằng dấu `|` (Ví dụ: `{TT}. {Số hiệu gói thầu} - {Tên gói thầu} | {Họ và tên} - {CCCD}`).
+   - Phần trước dấu `|` dùng để hiển thị gói thầu trên giao diện.
+   - Phần sau dấu `|` dùng để hiển thị và phân biệt danh sách thành viên lặp. Cột đầu tiên trong dấu `{}` của phần này sẽ tự động được trích xuất làm tên cột chứa tên thành viên (Họ tên) để đưa giá trị thô vào template Word.
 
 ### 3.4 Sheet `Workflow` – Định nghĩa template theo option
 
@@ -245,38 +257,44 @@ tpl.save("output.docx")
 [1] Load DataSet: duckdb excel extension quét tất cả .xlsx trong 1. Data/
     → Mỗi sheet (trừ S.*) thành 1 DuckDB table:
       GoiThau, Options, Workflow, Tables, Config
-    (Sheet S.* bỏ qua ở bước này — đọc riêng khi copy bảng)
+    → Tạo bản sao lưu DuckDB cho tất cả các bảng với hậu tố "_Goc" (Ví dụ: TCGTTD_Goc) để giữ nguyên dữ liệu gốc khi thực hiện đăng ký bảng tạm lặp.
 
 [2] UI – Chọn Option (Opt1 / Opt2):
     • Hiển thị radio button từ DuckDB table Options
-    • Nếu không chọn → báo lỗi "Select Option and click Submit"
 
 [3] UI – Chọn Gói thầu:
-    • Query: SELECT TT, GoiThau_ID, "Số hiệu gói thầu", "Tên gói thầu" FROM GoiThau
-    • Hiển thị dạng: "{TT}. {Số hiệu gói thầu} - {Tên gói thầu}"
+    • Query: SELECT * FROM {LeftSheet} (với LeftSheet lấy từ cấu hình Sheet của Option)
+    • Hiển thị gói thầu theo định dạng Show (phần trước dấu |)
 
-[4] UI – Chọn template file:
-    • Query từ DuckDB table Workflow:
-      WHERE Option = ? AND Price <= ? AND PriceMax >= ? AND (Type = 'ALL' OR Type = ?)
-    • Hiển thị checkbox list (có "Chọn tất cả" + "Bỏ chọn tất cả")
+[4] UI – Chọn đối tượng lặp / template file:
+    • Nếu Option thuộc loại "Repeat":
+        - Lấy danh sách thành viên/đối tượng từ bảng con {RightSheet}_Goc WHERE {JoinKey} = {goi_thau_id}.
+        - Hiển thị danh sách checkbox thành viên theo định dạng Show (phần sau dấu |).
+    • Nếu Option thông thường:
+        - Query Workflow lọc template theo Condition và Price.
+        - Hiển thị checkbox list template file.
 
 [5] Xác nhận chạy
         ↓
-Xóa toàn bộ 3. Files/
+Xóa toàn bộ 3. Files/ (hoặc giữ lại nếu đang chạy chế độ Retry sửa lỗi)
         ↓
-Copy template từ 2. Templates/{Option}/ sang 3. Files/
-  (chỉ copy file được checkbox)
+Trong chế độ Repeat (Lặp đối tượng):
+  • Đối với từng thành viên được tick chọn (tuần tự):
+    - Đăng ký dòng dữ liệu của thành viên đó vào bảng tạm {RightSheet} trong DuckDB để thực hiện JOIN query.
+    - Lấy template khớp với Workflow.
+    - Build context dict (tự động map cột sang key qua Config, trích xuất tên Họ tên động).
+    - Render và ghi đè bảng từ Excel (Tables) thông qua key_id và danh_muc_file.
+    - Save file output cho từng đối tượng lặp.
+Trong chế độ thông thường:
+  • Với từng file Word trong 3. Files/ (tuần tự):
+    - docxtpl scan template → lấy danh sách biến {{ }} cần thiết
+    - Query DuckDB table Config để map key → tên cột
+    - Lấy giá trị từ row đã chọn → build context dict
+    - Xử lý table placeholder từ Tables.
+    - Save file (đổi tên: bỏ "-Template").
         ↓
-Với từng file Word trong 3. Files/ (tuần tự):
-  • docxtpl scan template → lấy danh sách biến {{ }} cần thiết
-  • Query DuckDB table Config để map key → tên cột trong GoiThau
-  • Lấy giá trị từ row GoiThau đã chọn → build context dict
-  • docxtpl render với Jinja2 custom filters (date, date_long, number)
-  • Xử lý table placeholder: tra DuckDB table Tables
-    → đọc sheet S.* bằng openpyxl → copy bảng (python-docx/lxml)
-  • Save file (đổi tên: bỏ "-Template" + thêm GoiThau_ID)
-        ↓
-Báo cáo kết quả (runtime + open output folder nếu user chọn)
+Báo cáo kết quả (hiển thị trạng thái log chi tiết, nút mở thư mục log/output)
+
 ```
 
 > **Lưu ý về đổi tên file output:** File copy từ Templates sang Files vẫn giữ tên `-Template.docx`. Sau khi xử lý xong → đổi tên thành `{tên}-{GoiThau_ID}.docx`.
