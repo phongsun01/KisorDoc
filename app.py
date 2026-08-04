@@ -879,7 +879,12 @@ async def run_batch(option_key: str, package_label: str, selected_templates: lis
                 progress((i + 1) / len(selected_templates), desc=f"Đang xử lý thành viên: {member_name}")
 
             try:
-                register_temporary_tcgttd(goi_thau_id, [member_name], group_name, key_id, option_key)
+                ok = register_temporary_tcgttd(goi_thau_id, [member_name], group_name, key_id, option_key)
+                if not ok:
+                    msg = f"⚠️ Bỏ qua thành viên '{member_name}': không tìm thấy trong bảng dữ liệu"
+                    logger.write_item(member_name, fname, "SKIP", msg)
+                    results.append((member_name, "SKIP"))
+                    continue
 
                 joined_rows = ds.query(sql)
                 if not joined_rows:
