@@ -317,21 +317,38 @@ def get_package_excel_file(goi_thau_id: str, key_id: str = "GoiThau_ID") -> Path
 
 def _parse_repeat_sheet_config(opt_config: dict) -> tuple[str, str, str]:
     """
-    Phân tích cột Sheet dạng: 'GoiThau * TCGTTD @ GoiThau_ID'
+    Phân tích cột Sheet dạng join rút gọn:
+      GoiThau * TCGTTD @ GoiThau_ID          → INNER JOIN
+      GoiThau <* TCGTTD @ GoiThau_ID         → LEFT JOIN
+      GoiThau *> TCGTTD @ GoiThau_ID         → RIGHT JOIN
+      GoiThau <*> TCGTTD @ GoiThau_ID        → FULL OUTER JOIN
     Trả về (left_sheet, right_sheet, join_key).
-    Nếu không có ký hiệu * hoặc @, trả về (sheet, "", "").
+    Dùng cùng _OP_MAP với parse_join_expression để tránh split sai khi gặp <*> hay *>.
     """
-    sheet_expr = opt_config.get("sheet", "")
-    if "*" not in sheet_expr:
+    sheet_expr = opt_config.get("sheet", "").strip()
+
+    # Không có dấu @ → không phải join → trả về sheet đơn
+    if "@" not in sheet_expr:
         return sheet_expr, "", ""
-    left_part, right_part = sheet_expr.split("*", 1)
-    left_sheet = left_part.strip()
-    if "@" in right_part:
-        right_sheet, join_key = right_part.split("@", 1)
-    else:
-        right_sheet = right_part
-        join_key = ""
-    return left_sheet.strip(), right_sheet.strip(), join_key.strip()
+
+    join_part, key_raw = sheet_expr.split("@", 1)
+    join_part = join_part.strip()
+    join_key  = key_raw.strip()
+
+    # Dùng _OP_MAP (theo thứ tự ưu tiên: <*> trước <* trước *> trước *)
+    _OP_MAP = [
+        (" <*>", "FULL OUTER JOIN"),
+        (" <*",  "LEFT JOIN"),
+        (" *>",  "RIGHT JOIN"),
+        (" *",   "INNER JOIN"),
+    ]
+    for sym, _ in _OP_MAP:
+        if sym in join_part:
+            left, right = join_part.split(sym.strip(), 1)
+            return left.strip(), right.strip(), join_key
+
+    # Không khớp operator nào → trả về sheet đơn
+    return sheet_expr, "", ""
 
 
 def get_repeat_members(goi_thau_id: str, group_type: str, option_key: str = None) -> list[str]:
