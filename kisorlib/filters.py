@@ -36,21 +36,23 @@ def filter_date(value):
 
 def filter_date_long(value):
     val_str = str(value) if value is not None else ""
-    if "/" in val_str:
-        parts = val_str.split("/")
-        if len(parts) == 3:
-            day_part = parts[0]
-            month_part = parts[1]
-            year_part = parts[2]
-            if not day_part.strip() or not month_part.strip():
-                day_str = f" {day_part.strip()} " if day_part.strip() else "   "
-                month_str = f" {month_part.strip()} " if month_part.strip() else "   "
-                year_str = f" {year_part.strip()}" if year_part.strip() else year_part
-                return f"ngày{day_str}tháng{month_str}năm{year_str}"
-
     if not value or str(value).strip() == "":
         now = datetime.now()
         return f"tháng {now.month:02d} năm {now.year}"
+    if "/" in val_str:
+        parts = val_str.split("/")
+        if len(parts) == 3 and all(p.strip() for p in parts):
+            day_part = parts[0]
+            month_part = parts[1]
+            year_part = parts[2]
+            try:
+                dt = datetime.strptime(
+                    f"{day_part.strip()}/{month_part.strip()}/{year_part.strip()}",
+                    "%d/%m/%Y"
+                )
+                return f"ngày {dt.day:02d} tháng {dt.month:02d} năm {dt.year}"
+            except ValueError:
+                pass
     if isinstance(value, datetime):
         return f"ngày {value.day:02d} tháng {value.month:02d} năm {value.year}"
     try:

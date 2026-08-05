@@ -117,32 +117,32 @@ def _normalize_placeholder_key(raw: str) -> str:
 
 def _match_word(tables_word: str, file_stem: str) -> bool:
     """
-    FIX: Matching more lenient - partial match instead of exact.
-    Handle variations in naming conventions.
+    Match table's Word column to file stem.
+    FIX: Use prefix matching instead of substring matching.
+    e.g., "BB HDMS" matches "BB HDMS.1" but NOT "BB HDMS 2"
     """
     t = tables_word.strip().lower()
     f = file_stem.strip().lower()
-    
-    # Remove leading numbers: "3. yeu cau" or "9.1 bc" or "18.2. bb" -> "yeu cau" or "bc" or "bb"
+
+    # Remove leading numbers: "3. yeu cau" or "9.1 bc" -> "yeu cau" or "bc"
     f_no_prefix = re.sub(r"^\d+(\.\d+)*\.?\s*", "", f).strip()
     t_no_prefix = re.sub(r"^\d+(\.\d+)*\.?\s*", "", t).strip()
-    
+
     # Exact match (best)
     if t == f or t == f_no_prefix or t_no_prefix == f or t_no_prefix == f_no_prefix:
         return True
-    
-    # Partial match - check if one contains the other (handle variations)
-    # e.g., "4. BB HDMS.1" matches "4. BB HDMS" or "BB HDMS"
-    if len(t) > 3 and len(f) > 3:
-        # Remove special chars for comparison
-        t_clean = re.sub(r"[^\w\s]", "", t_no_prefix)
-        f_clean = re.sub(r"[^\w\s]", "", f_no_prefix)
-        
-        # Check if one contains the other (at least 5 chars)
-        if len(t_clean) > 5 and len(f_clean) > 5:
-            if t_clean in f_clean or f_clean in t_clean:
-                return True
-    
+
+    # Prefix match: shorter is prefix of longer with word boundary
+    # "bb hdms" matches "bb hdms.1" (dot = version suffix)
+    # "bb hdms" matches "bb hdms-xxx" (hyphen = goi_thau_id separator)
+    # "bb hdms" NOT matches "bb hdms 2" (space + digit = different template)
+    shorter, longer = (t_no_prefix, f_no_prefix) if len(t_no_prefix) <= len(f_no_prefix) else (f_no_prefix, t_no_prefix)
+
+    if longer.startswith(shorter):
+        rest = longer[len(shorter):]
+        if not rest or rest[0] in ('.', '-'):
+            return True
+
     return False
 
 
@@ -617,8 +617,14 @@ def _excel_date_fmt_to_strftime(excel_fmt: str) -> str:
         ("S",    "%S"),
     ]
     result = excel_fmt.upper()
-    for excel_token, py_token in mapping:
-        result = result.replace(excel_token, py_token)
+    # Pass 1: đổi token Excel → placeholder tạm để tránh replace chồng
+    # (vd: "SS" → "%S" xong "S" → "%S" sẽ biến "%S" thành "%%S").
+    # Placeholder chỉ dùng chữ số + underscore — không chứa Y/M/D/H/S nên không bị đụng.
+    for i, (excel_token, _) in enumerate(mapping):
+        result = result.replace(excel_token, f"__{i}__")
+    # Pass 2: đổi placeholder → strftime token
+    for i, (_, py_token) in enumerate(mapping):
+        result = result.replace(f"__{i}__", py_token)
 
     # Fallback nếu còn token chưa convert
     if "%" not in result:

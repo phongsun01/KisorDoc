@@ -49,7 +49,8 @@ def mail_merge_safe(template_path, context: dict, output_path) -> tuple[bool, st
     context.setdefault("now", datetime.now())
 
     import tempfile, shutil
-    tmp = Path(tempfile.mktemp(suffix=".docx"))
+    with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as f:
+        tmp = Path(f.name)
     try:
         doc = DocxTemplate(str(template_path))
         jenv = jinja2.Environment(undefined=jinja2.DebugUndefined)

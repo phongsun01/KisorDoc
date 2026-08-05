@@ -1,7 +1,7 @@
 # PRD – Word Batch Processor (KisorDoc-AI)
-**Phiên bản:** 3.2.2  
-**Ngày:** 2026-08-04  
-**Trạng thái:** Production Ready (ver3.2.2)
+**Phiên bản:** 4.0.0  
+**Ngày:** 2026-08-05  
+**Trạng thái:** Production Ready (ver4.0.0)
 
 
 ---
@@ -1052,4 +1052,29 @@ F5 (Version pin)    ← Nice-to-have, làm cuối
 
 *   Tự động bỏ qua các file Excel nguồn chứa bảng biểu bắt đầu bằng chữ `S.` lúc khởi động app. Các file này chỉ được mở đọc khi thực hiện tiến trình chèn bảng biểu vào Word, giúp ứng dụng khởi động tức thì và tiết kiệm 90% dung lượng RAM.
 *   Hệ thống tự động thực hiện **gộp (concatenate)** dữ liệu từ nhiều file Excel khi phát hiện trùng tên sheet (Ví dụ: Sheet `Tables` có ở cả `Tables.xlsx` và `DanhMuc-MSSC.xlsx`).
+
+---
+
+## 13. Các cập nhật trong Phiên bản 4.0 (2026-08-05)
+
+### 13.1 Tái cấu trúc mã nguồn app.py (Refactoring app.py)
+*   Phân rã file `app.py` cồng kềnh dài ~1780 dòng thành các module nhỏ, đơn nhiệm và được đóng gói trong thư mục cốt lõi `kisorlib/`:
+    *   `kisorlib/utils.py`: Đóng gói các hàm tiện ích thuần túy (pure functions) như xử lý chuỗi, định dạng, phân tích cú pháp join rút gọn.
+    *   `kisorlib/service.py`: Chứa lớp `KisorService` chịu trách nhiệm xử lý logic nghiệp vụ, giao tiếp DataSet (DuckDB). Loại bỏ trạng thái toàn cục `config` và `ds` qua Dependency Injection.
+    *   `kisorlib/batch.py`: Đóng gói logic sinh tài liệu hàng loạt `run_batch` và `run_retry_batch`. Module này hoàn toàn độc lập với Gradio UI bằng cách sử dụng callback `progress_cb: Callable` thay vì `gr.Progress`.
+    *   `app.py`: Rút gọn xuống chỉ còn ~360 dòng, đóng vai trò là entry point cấu hình layout và kết nối event handler của giao diện Gradio UI.
+
+### 13.2 Loại bỏ mã nguồn trùng lặp trong engine.py
+*   Loại bỏ hoàn toàn các hàm clone trùng lặp trước đó (`_clean_config_key`, `_get_option_config_from_ds`) trong `kisorlib/engine.py`.
+*   Chuyển sang import và tái sử dụng trực tiếp cấu hình/tiện ích từ `kisorlib.utils` và `kisorlib.service`.
+
+### 13.3 Khắc phục lỗi hiển thị Preview trong chế độ lặp Repeat
+*   Khắc phục lỗi composite `key_id` (khi cấu hình `key_id` chứa ký tự ghép `|`) trong hàm `run_preview`, đảm bảo phân tích chính xác khóa bảng chính (`left_key`) để tìm đúng thông tin bảng liên kết hiển thị lên Preview UI.
+
+### 13.4 Bộ kiểm thử tự động (Unit Tests)
+*   Bổ sung thư mục kiểm thử `tests/` chứa các bộ test case tự động:
+    *   [tests/test_utils.py](file:///D:/Antigravity/KisorDoc/tests/test_utils.py): Kiểm tra các hàm thuần túy như phân tích giá tiền, dọn dẹp key config, biểu thức join rút gọn, giải quyết khoảng dòng,...
+    *   [tests/test_filters.py](file:///D:/Antigravity/KisorDoc/tests/test_filters.py): Kiểm tra bộ lọc định dạng số `filter_number`.
+*   Giúp chạy kiểm thử hồi quy tức thì và bảo vệ tính đúng đắn của logic tính toán khi phát triển ứng dụng.
+
 

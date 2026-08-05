@@ -1,5 +1,21 @@
 # Changelog
 
+## [4.0.0] - 2026-08-05
+
+### Changed
+- **Tái cấu trúc mã nguồn app.py toàn diện:** Phân rã file `app.py` khổng lồ dài ~1780 dòng thành các module nhỏ, đơn nhiệm bên trong thư mục `kisorlib/` để nâng cao chất lượng code và dễ bảo trì:
+  - [kisorlib/utils.py](file:///D:/Antigravity/KisorDoc/kisorlib/utils.py): Các hàm tiện ích thuần túy (pure functions).
+  - [kisorlib/service.py](file:///D:/Antigravity/KisorDoc/kisorlib/service.py): Lớp nghiệp vụ `KisorService` loại bỏ global state `config`/`ds` thông qua Dependency Injection.
+  - [kisorlib/batch.py](file:///D:/Antigravity/KisorDoc/kisorlib/batch.py): Hàm sinh tài liệu hàng loạt `run_batch` và `run_retry_batch` độc lập hoàn toàn với thư viện Gradio.
+  - [app.py](file:///D:/Antigravity/KisorDoc/app.py): Rút gọn xuống chỉ còn ~360 dòng đóng vai trò kết nối UI Gradio.
+- **Dọn dẹp mã trùng lặp trong engine.py:** Xóa bỏ các hàm clone trùng lặp trước đó (`_clean_config_key`, `_get_option_config_from_ds`) trong `kisorlib/engine.py` và tái sử dụng trực tiếp từ `utils.py` và `service.py`.
+
+### Added
+- **Unit Tests tự động:** Bổ sung thư mục kiểm thử `tests/` với các bộ test tự động [tests/test_utils.py](file:///D:/Antigravity/KisorDoc/tests/test_utils.py) và [tests/test_filters.py](file:///D:/Antigravity/KisorDoc/tests/test_filters.py) giúp chạy hồi quy nhanh chóng.
+
+### Fixed
+- **Sửa lỗi Preview ở chế độ Repeat:** Khắc phục triệt để lỗi phân tích sai ID gói thầu dạng composite (`key_id` chứa `|`) trong chức năng Preview (`run_preview`).
+
 ## [3.2.3] - 2026-08-04
 
 ### Fixed

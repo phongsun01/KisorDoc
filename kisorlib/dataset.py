@@ -69,14 +69,18 @@ class DataSet:
 
     def _query_rows_impl(self, sheet_name: str, row_start: int, row_end: int) -> list[dict]:
         xlsx_files = sorted(self.config.data_path.glob("*.xlsx"))
+        exception_prefix = self.config.ExceptionSheet
         actual_file = None
         clean_sheet = sheet_name.strip()
         for f in xlsx_files:
-            if f.name.startswith("~$"):
+            if f.name.startswith("~$") or f.name.startswith(exception_prefix):
                 continue
             try:
                 wb = openpyxl.load_workbook(f, read_only=True)
-                if any(s.strip() == clean_sheet for s in wb.sheetnames):
+                if any(
+                    s.strip() == clean_sheet and not s.strip().startswith(exception_prefix)
+                    for s in wb.sheetnames
+                ):
                     actual_file = f
                     wb.close()
                     break
@@ -90,7 +94,10 @@ class DataSet:
 
         try:
             wb = openpyxl.load_workbook(actual_file, read_only=True, data_only=True)
-            actual_sheet_name = next(s for s in wb.sheetnames if s.strip() == clean_sheet)
+            actual_sheet_name = next(
+                s for s in wb.sheetnames
+                if s.strip() == clean_sheet and not s.strip().startswith(exception_prefix)
+            )
             ws = wb[actual_sheet_name]
 
             header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)

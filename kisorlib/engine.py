@@ -19,6 +19,8 @@ import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List, Optional
+from .service import KisorService
+from .utils import clean_config_key
 
 from pydantic import BaseModel, field_validator
 
@@ -138,47 +140,6 @@ def _prepare_output_dir(output_dir: Path, cb: ProgressCallback) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
 
-def _get_option_config_from_ds(ds, option_key: str) -> dict:
-    """Mirror của get_option_config() trong app.py — nhận ds thay vì global."""
-    opt_code = option_key.split(":")[0].strip() if ":" in option_key else option_key.strip()
-    try:
-        rows = ds.query("SELECT * FROM Options")
-    except Exception:
-        rows = []
-    for r in rows:
-        if str(r.get("Key", "")).strip() == opt_code:
-            s = lambda v, d="": str(v).strip() if v else d
-            return {
-                "sheet":        s(r.get("Sheet"),  "GoiThau"),
-                "show":         s(r.get("Show"),   "{TT}. {Số hiệu gói thầu} - {Tên gói thầu}"),
-                "key_id":       s(r.get("KeyId"),  "ID"),
-                "config_range": s(r.get("Config"), ""),
-                "type":         s(r.get("Type"),   ""),
-            }
-    return {"sheet": "GoiThau", "show": "", "key_id": "ID", "config_range": "", "type": ""}
-
-
-def _clean_config_key(key: str) -> str:
-    """Mirror của clean_config_key() trong app.py."""
-    clean = key.strip("<>{}| ")
-    for suffix in (".Date.Long", ".Date.long", ".date_long"):
-        if clean.endswith(suffix):
-            return clean[:-len(suffix)] + "_Date"
-    if clean.endswith(".Date") or clean.endswith(".date"):
-        return clean[:-5] + "_Date"
-    if clean.endswith(".Day") or clean.endswith(".day"):
-        return clean[:-4] + "_Date"
-    if clean.endswith(".Month") or clean.endswith(".month"):
-        return clean[:-6] + "_Date"
-    if clean.endswith(".Year") or clean.endswith(".year"):
-        return clean[:-5] + "_Date"
-    for suffix in (".Upper", ".upper", ".Number", ".number"):
-        if clean.endswith(suffix):
-            clean = clean[:-len(suffix)]
-            break
-    if "|" in clean:
-        clean = clean.split("|")[0].strip()
-    return clean
 
 
 # FIX #3: Viết lại hoàn toàn — không còn method ảo nào
@@ -191,7 +152,7 @@ def _build_context(ds, req: GenerateRequest, cfg, cb: ProgressCallback) -> Optio
     import pandas as _pd
     from datetime import datetime as _dt
 
-    opt_config = _get_option_config_from_ds(ds, req.option)
+    opt_config = KisorService(cfg, ds).get_option_config(req.option)
     sheet      = opt_config.get("sheet", "GoiThau")
     key_id     = opt_config.get("key_id", "ID")
 
@@ -233,7 +194,7 @@ def _build_context(ds, req: GenerateRequest, cfg, cb: ProgressCallback) -> Optio
         col = str(r.get("Value", "") or "").strip()
         if not key or not col:
             continue
-        clean_key = _clean_config_key(key)
+        clean_key = clean_config_key(key)
         raw_value = selected_pkg.get(col, "")
         try:
             is_na = _pd.isna(raw_value)
@@ -392,7 +353,7 @@ def generate_documents(
     _emit(cb, LEVEL_INFO, f"Context: {len(context)} keys")
 
     # Metadata cho copy_tables
-    opt_config = _get_option_config_from_ds(ds, request.option)
+    opt_config = KisorService(cfg, ds).get_option_config(request.option)
     key_id     = opt_config.get("key_id", "ID")
     try:
         tables_data = ds.query("SELECT * FROM Tables")
@@ -488,7 +449,7 @@ def list_packages(option_key: str = "") -> List[str]:
     try:
         cfg        = load_config()
         ds         = DataSet(cfg)
-        opt_config = _get_option_config_from_ds(ds, option_key) if option_key else {}
+        opt_config = KisorService(cfg, ds).get_option_config(option_key) if option_key else {}
         key_id     = opt_config.get("key_id", "ID")
         sheet      = opt_config.get("sheet",  "GoiThau")
         rows       = ds.query(f'SELECT DISTINCT "{key_id}" FROM "{sheet}"')
