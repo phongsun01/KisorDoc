@@ -62,10 +62,8 @@ Các vấn đề kiến trúc và lỗi trong danh sách trên đã được gi�
 3. **Bổ sung Unit Tests tự động**:
    - Viết thêm bộ test chuyên biệt [tests/test_service.py](file:///D:/Antigravity/KisorDoc/tests/test_service.py) chạy trên bộ dữ liệu giả lập in-memory để kiểm thử `KisorService`, Repeat mode, đăng ký thành viên tạm thời và preview composite key.
 
-### Rủi ro bảo mật tiềm ẩn còn lại (SQL Identifier Injection)
-- **Vấn đề**: Mặc dù giá trị dữ liệu đã được tham số hóa an toàn bằng `?`, tên cột (`join_key`, `key_id`) và tên bảng (`right_sheet`) vẫn được nối chuỗi trực tiếp từ cấu hình Excel:
-  ```python
-  f'SELECT * FROM "{right_sheet}_Goc" WHERE "{join_key}" = ?'
-  ```
-- **Khuyến nghị**: Trong tương lai nên bổ sung một hàm whitelist kiểm tra định dạng tên cột/tên bảng (chỉ chấp nhận các ký tự an toàn `^[A-Za-z0-9_\s\-\.\#\u00C0-\u1EF9]+$`) để tránh rủi ro SQL Injection qua cấu hình Excel.
+### Bảo mật SQL (SQL Identifier Injection - Đã giải quyết)
+- **Vấn đề**: Trước đây, mặc dù giá trị dữ liệu đã được tham số hóa an toàn bằng `?`, tên cột (`join_key`, `key_id`) và tên bảng (`right_sheet`) vẫn được nối chuỗi trực tiếp từ cấu hình Excel.
+- **Giải pháp**: Đã bổ sung hàm `validate_sql_identifier` sử dụng regex whitelist `^[A-Za-z0-9_\s\-\.\#\u00C0-\u1EF9]+$` để kiểm tra định dạng an toàn trước khi thực hiện câu lệnh SQL, triệt tiêu hoàn toàn nguy cơ chèn mã SQL qua Excel.
+
 

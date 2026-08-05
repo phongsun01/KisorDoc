@@ -22,6 +22,17 @@ def _str(val, default="") -> str:
     return str(val).strip()
 
 
+def validate_sql_identifier(name: str) -> str:
+    if not name:
+        return ""
+    # Whitelist pattern for secure column/table name formatting
+    pattern = r"^[A-Za-z0-9_\s\-\.\#\u00C0-\u1EF9]+$"
+    if not re.match(pattern, name):
+        raise ValueError(f"⚠️ Cảnh báo bảo mật: Phát hiện ký tự không hợp lệ trong tên bảng hoặc cột (SQL Injection Risk): '{name}'")
+    return name
+
+
+
 def clean_config_key(key: str) -> str:
     clean = key.strip("<>{}| ")
     
@@ -176,7 +187,7 @@ def parse_join_expression(expr: str) -> str:
     if s.lower().startswith("select"):
         return s
     if "@" not in s:
-        return f'SELECT * FROM "{s}"'
+        return f'SELECT * FROM "{validate_sql_identifier(s)}"'
 
     join_part, key_raw = s.split("@", 1)
     join_part = join_part.strip()
@@ -188,17 +199,17 @@ def parse_join_expression(expr: str) -> str:
         if sym in join_part:
             join_type = jt
             left, right = join_part.split(sym.strip(), 1)
-            t1 = left.strip()
-            t2 = right.strip()
+            t1 = validate_sql_identifier(left.strip())
+            t2 = validate_sql_identifier(right.strip())
             break
 
     if not join_type:
-        return f'SELECT * FROM "{s}"'
+        return f'SELECT * FROM "{validate_sql_identifier(s)}"'
 
     if "=" in key_raw:
-        k1, k2 = [k.strip() for k in key_raw.split("=", 1)]
+        k1, k2 = [validate_sql_identifier(k.strip()) for k in key_raw.split("=", 1)]
     else:
-        k1 = k2 = key_raw
+        k1 = k2 = validate_sql_identifier(key_raw)
 
     return (
         f'SELECT * FROM "{t1}" {join_type} "{t2}" '
@@ -220,7 +231,7 @@ def resolve_sheet_query(sheet_name: str) -> str:
         return s
     if _JOIN_RE.match(s):
         return parse_join_expression(s)
-    return f'SELECT * FROM "{s}"'
+    return f'SELECT * FROM "{validate_sql_identifier(s)}"'
 
 
 def _parse_repeat_sheet_config(opt_config: dict) -> tuple[str, str, str]:
@@ -237,20 +248,26 @@ def _parse_repeat_sheet_config(opt_config: dict) -> tuple[str, str, str]:
 
     # Không có dấu @ → không phải join → trả về sheet đơn
     if "@" not in sheet_expr:
-        return sheet_expr, "", ""
+        return validate_sql_identifier(sheet_expr), "", ""
 
     join_part, key_raw = sheet_expr.split("@", 1)
     join_part = join_part.strip()
-    join_key  = key_raw.strip()
+    
+    key_raw = key_raw.strip()
+    if "=" in key_raw:
+        parts = [validate_sql_identifier(k.strip()) for k in key_raw.split("=", 1)]
+        join_key = f"{parts[0]} = {parts[1]}"
+    else:
+        join_key = validate_sql_identifier(key_raw)
 
     # Dùng chung constant _OP_MAP (theo thứ tự ưu tiên: <*> trước <* trước *> trước *)
     for sym, _ in _OP_MAP:
         if sym in join_part:
             left, right = join_part.split(sym.strip(), 1)
-            return left.strip(), right.strip(), join_key
+            return validate_sql_identifier(left.strip()), validate_sql_identifier(right.strip()), join_key
 
     # Không khớp operator nào → trả về sheet đơn
-    return sheet_expr, "", ""
+    return validate_sql_identifier(sheet_expr), "", ""
 
 
 def _parse_repeat_key_id(key_id_expr: str) -> tuple[str, str]:
@@ -262,8 +279,9 @@ def _parse_repeat_key_id(key_id_expr: str) -> tuple[str, str]:
         return "ID", "ID"
     if "|" in key_id_expr:
         parts = key_id_expr.split("|", 1)
-        return parts[0].strip(), parts[1].strip()
-    return key_id_expr.strip(), key_id_expr.strip()
+        return validate_sql_identifier(parts[0].strip()), validate_sql_identifier(parts[1].strip())
+    val = validate_sql_identifier(key_id_expr.strip())
+    return val, val
 
 
 def _parse_price(val) -> float | None:

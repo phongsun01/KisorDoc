@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.0.3] - 2026-08-05
+
+### Added
+- **Bảo mật Định danh SQL (SQL Identifier Whitelist):** Bổ sung hàm `validate_sql_identifier` với regex whitelist `^[A-Za-z0-9_\s\-\.\#\u00C0-\u1EF9]+$` để lọc sạch toàn bộ tên bảng và tên cột động đọc từ Excel trước khi thực hiện SQL. Triệt tiêu hoàn toàn nguy cơ SQL Identifier Injection.
+- **Mở rộng Unit Tests:** Bổ sung các test case trong [test_utils.py](file:///D:/Antigravity/KisorDoc/tests/test_utils.py#L118) kiểm chứng hoạt động của hàm whitelist với các chuỗi độc hại.
+
+### Changed
+- **Cập nhật Tài liệu Lỗi:** Đánh dấu lỗi SQL Identifier Injection đã được khắc phục hoàn toàn trong [known-issues.md](file:///D:/Antigravity/KisorDoc/docs/known-issues.md#L65).
+
 ## [4.0.2] - 2026-08-05
 
 ### Changed

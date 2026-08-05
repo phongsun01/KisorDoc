@@ -15,6 +15,7 @@ from .utils import (
     _parse_price,
     _parse_row_range,
     _safe_eval_condition,
+    validate_sql_identifier,
 )
 
 
@@ -186,6 +187,7 @@ class KisorService:
     def get_package_excel_file(self, goi_thau_id: str, key_id: str | None = None) -> Path | None:
         if key_id is None:
             key_id = self.config.DefaultKeyId
+        key_id = validate_sql_identifier(key_id)
         try:
             rows = self.ds.query(f'SELECT DISTINCT File FROM Tables WHERE "{key_id}" = ? AND File IS NOT NULL AND File != \'nan\'', (goi_thau_id,))
             if rows:

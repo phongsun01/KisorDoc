@@ -10,6 +10,7 @@ from kisorlib.utils import (
     _str,
     safe_format,
     _safe_eval_condition,
+    validate_sql_identifier,
 )
 
 
@@ -115,3 +116,24 @@ def test_safe_eval_condition():
     assert _safe_eval_condition("var_0 > 1000000 or var_1 == 'Active'", {"var_0": 500000, "var_1": "Inactive"}) is False
     with pytest.raises(ValueError):
         _safe_eval_condition("var_x == 1", {})
+
+
+def test_validate_sql_identifier():
+    # Đúng chuẩn whitelist
+    assert validate_sql_identifier("GoiThau") == "GoiThau"
+    assert validate_sql_identifier("GoiThau_ID") == "GoiThau_ID"
+    assert validate_sql_identifier("Tổ chuyên gia") == "Tổ chuyên gia"  # Tiếng Việt hợp lệ
+    assert validate_sql_identifier("Số hiệu gói thầu") == "Số hiệu gói thầu"  # Khoảng trắng
+    assert validate_sql_identifier("Member-ID") == "Member-ID"  # Dấu gạch ngang
+    assert validate_sql_identifier("Config.Date") == "Config.Date"  # Dấu chấm
+    assert validate_sql_identifier("#TempTable") == "#TempTable"  # Dấu thăng
+    assert validate_sql_identifier("") == ""
+
+    # Có ký tự nguy hiểm (SQL Injection)
+    with pytest.raises(ValueError, match="Cảnh báo bảo mật"):
+        validate_sql_identifier("GoiThau; DROP TABLE Options; --")
+    with pytest.raises(ValueError, match="Cảnh báo bảo mật"):
+        validate_sql_identifier("ID' OR '1'='1")
+    with pytest.raises(ValueError, match="Cảnh báo bảo mật"):
+        validate_sql_identifier("ID\" OR \"1\"=\"1")
+
