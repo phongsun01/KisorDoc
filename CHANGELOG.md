@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.0.2] - 2026-08-05
+
+### Changed
+- **Tài liệu hóa các vấn đề kiến trúc (known-issues.md):** Cập nhật tình hình sửa lỗi kiến trúc, dọn dẹp hardcode, bảo mật SQL Parameter Binding và ghi nhận rủi ro SQL Identifier Injection tiềm ẩn.
+- **Tổng quát hóa giao diện:** Cập nhật mặc định nhóm lặp trong [ui_labels.json](file:///D:/Antigravity/KisorDoc/ui_labels.json) từ gán cứng `"Tổ chuyên gia" / "Tổ thẩm định"` thành `"Nhóm lặp 1" / "Nhóm lặp 2"`.
+
+### Fixed
+- **Sửa lỗi đồng bộ Radio State của Gradio:** Khắc phục lỗi `gradio.exceptions.Error` khi khởi tạo/reset app về quy trình trống bằng cách khôi phục lại các lựa chọn mặc định và giá trị hợp lệ cho `group_radio`.
+
 ## [4.0.1] - 2026-08-05
 
 ### Changed
@@ -7,7 +16,7 @@
 - **Dọn dẹp hardcode còn lại trong api.py:** Cập nhật `api.py` sử dụng thuộc tính đường dẫn động `cfg.data_path` và tên bảng động `cfg.DataSheet`, đồng thời sửa lỗi khởi tạo `DataSet` truyền tham số `excel_files` không còn được hỗ trợ.
 
 ### Added
-- **Mở rộng Unit Tests:** Bổ sung file test chuyên biệt [tests/test_service.py](file:///D:/Antigravity/KisorDoc/tests/test_service.py) để bao phủ `KisorService`, Repeat mode, đăng ký bảng tạm thành viên và preview composite key.
+- **Mở rộng Unit Tests:** Bổ sung file test chuyên biệt [tests/test_service.py](tests/test_service.py) để bao phủ `KisorService`, Repeat mode, đăng ký bảng tạm thành viên và preview composite key.
 
 ## [4.0.0] - 2026-08-05
 

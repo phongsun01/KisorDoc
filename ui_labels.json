@@ -16,5 +16,5 @@
   "repeat_group_title": "Chọn Nhóm lặp",
   "repeat_member_title": "Chọn Đối tượng lặp cần xử lý",
   "repeat_group_default": "Nhóm đối tượng",
-  "repeat_group_choices": ["Tổ chuyên gia", "Tổ thẩm định"]
+  "repeat_group_choices": ["Nhóm lặp 1", "Nhóm lặp 2"]
 }

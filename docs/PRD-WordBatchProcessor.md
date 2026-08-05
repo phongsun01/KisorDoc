@@ -1,7 +1,7 @@
 # PRD – Word Batch Processor (KisorDoc-AI)
-**Phiên bản:** 4.0.1  
+**Phiên bản:** 4.0.2  
 **Ngày:** 2026-08-05  
-**Trạng thái:** Production Ready (ver4.0.1)
+**Trạng thái:** Production Ready (ver4.0.2)
 
 
 ---
@@ -1055,7 +1055,7 @@ F5 (Version pin)    ← Nice-to-have, làm cuối
 
 ---
 
-## 13. Các cập nhật trong Phiên bản 4.0 & 4.0.1 (2026-08-05)
+## 13. Các cập nhật trong Phiên bản 4.0, 4.0.1 & 4.0.2 (2026-08-05)
 
 ### 13.1 Tái cấu trúc mã nguồn app.py (Refactoring app.py)
 *   Phân rã file `app.py` cồng kềnh dài ~1780 dòng thành các module nhỏ, đơn nhiệm và được đóng gói trong thư mục cốt lõi `kisorlib/`:
@@ -1073,14 +1073,19 @@ F5 (Version pin)    ← Nice-to-have, làm cuối
 
 ### 13.4 Bộ kiểm thử tự động (Unit Tests)
 *   Bổ sung thư mục kiểm thử `tests/` chứa các bộ test case tự động:
-    *   [tests/test_utils.py](file:///D:/Antigravity/KisorDoc/tests/test_utils.py): Kiểm tra các hàm thuần túy như phân tích giá tiền, dọn dẹp key config, biểu thức join rút gọn, giải quyết khoảng dòng,...
-    *   [tests/test_filters.py](file:///D:/Antigravity/KisorDoc/tests/test_filters.py): Kiểm tra bộ lọc định dạng số `filter_number`.
+    *   [tests/test_utils.py](tests/test_utils.py): Kiểm tra các hàm thuần túy như phân tích giá tiền, dọn dẹp key config, biểu thức join rút gọn, giải quyết khoảng dòng,...
+    *   [tests/test_filters.py](tests/test_filters.py): Kiểm tra bộ lọc định dạng số `filter_number`.
 *   Giúp chạy kiểm thử hồi quy tức thì và bảo vệ tính đúng đắn của logic tính toán khi phát triển ứng dụng.
 
 ### 13.5 Bản vá 4.0.1 (Bảo mật SQL & Bổ sung Unit Tests)
 *   **Bảo mật SQL (Parameter Binding):** Tách biệt dữ liệu truyền vào khỏi câu lệnh SQL trong `kisorlib/service.py` bằng DuckDB parameter binding `?` để ngăn chặn hoàn toàn SQL Injection.
 *   **Dọn dẹp hardcode còn lại trong api.py:** Cập nhật `api.py` sử dụng thuộc tính đường dẫn động `cfg.data_path` và tên bảng động `cfg.DataSheet`, đồng thời sửa lỗi khởi tạo `DataSet` truyền tham số `excel_files` lỗi thời.
-*   **Kiểm thử dịch vụ [tests/test_service.py](file:///D:/Antigravity/KisorDoc/tests/test_service.py):** Bổ sung unit tests cho `KisorService`, kiểm tra Repeat mode, đăng ký bảng thành viên tạm thời và preview composite key.
+*   **Kiểm thử dịch vụ [tests/test_service.py](tests/test_service.py):** Bổ sung unit tests cho `KisorService`, kiểm tra Repeat mode, đăng ký bảng thành viên tạm thời và preview composite key.
+
+### 13.6 Bản vá 4.0.2 (Động hóa lựa chọn lặp & Sửa lỗi Radio State của Gradio)
+*   **Tổng quát hóa bộ chọn lặp:** Đổi mặc định nhóm lặp trong [ui_labels.json](file:///D:/Antigravity/KisorDoc/ui_labels.json) từ gán cứng `"Tổ chuyên gia" / "Tổ thẩm định"` thành `"Nhóm lặp 1" / "Nhóm lặp 2"`.
+*   **Sửa lỗi đồng bộ Radio State của Gradio:** Khắc phục lỗi `gradio.exceptions.Error` khi khởi tạo/reset app về quy trình trống bằng cách khôi phục lại các lựa chọn mặc định và giá trị hợp lệ cho `group_radio`.
+*   **Cập nhật tài liệu lỗi [known-issues.md](file:///D:/Antigravity/KisorDoc/docs/known-issues.md):** Bổ sung kết quả xử lý và phân tích rủi ro bảo mật tiềm ẩn SQL Identifier Injection.
 
 
 

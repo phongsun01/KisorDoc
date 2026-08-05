@@ -57,6 +57,14 @@ def dummy_service():
     ds.conn.register("TCGTTD_Goc", df_tcgttd)
     ds.table_names.append("TCGTTD_Goc")
 
+    # 5. Bảng Tables (nguồn copy bảng) — để assert composite key preview lọc đúng gói thầu
+    df_tables = pd.DataFrame([
+        {"ID": "MS26-01", "Name": "Bang cua MS26-01", "Sheet": "S.Oto", "Range": "A1:C10"},
+        {"ID": "MS26-99", "Name": "Bang khac", "Sheet": "S.Khac", "Range": "A1:B5"},
+    ])
+    ds.conn.register("Tables", df_tables)
+    ds.table_names.append("Tables")
+
     return KisorService(config, ds)
 
 
@@ -82,19 +90,62 @@ def test_service_get_repeat_members(dummy_service):
     assert "Tran Thi B" in members
 
 
+def test_service_check_condition(dummy_service):
+    svc = dummy_service
+    cfg = [{"Key": "Gia", "Value": "Price"}]
+
+    # So sánh giá qua {Placeholder} → _parse_price
+    assert svc.check_condition("{Gia} > 1000000", {"Price": 1500000.0}, cfg) is True
+    assert svc.check_condition("{Gia} > 1000000", {"Price": 500000.0}, cfg) is False
+
+    # Giá dạng chuỗi phân tách nghìn kiểu Excel "1.500.000" được parse đúng
+    assert svc.check_condition("{Gia} > 1000000", {"Price": "1.500.000"}, cfg) is True
+    assert svc.check_condition("{Gia} < 2000000", {"Price": "1.500.000"}, cfg) is True
+
+    # AND / OR
+    assert svc.check_condition("{Gia} > 1000000 and {TrangThai} == 'Active'",
+                               {"Price": 1500000.0, "TrangThai": "Active"}, cfg) is True
+    assert svc.check_condition("{Gia} > 1000000 and {TrangThai} == 'Active'",
+                               {"Price": 1500000.0, "TrangThai": "Inactive"}, cfg) is False
+    assert svc.check_condition("{Gia} > 1000000 or {TrangThai} == 'Active'",
+                               {"Price": 500000.0, "TrangThai": "Active"}, cfg) is True
+    assert svc.check_condition("{Gia} > 1000000 or {TrangThai} == 'Active'",
+                               {"Price": 500000.0, "TrangThai": "Inactive"}, cfg) is False
+
+    # Placeholder không có mapping → fallback dùng chính tên placeholder làm tên cột
+    assert svc.check_condition("{Price} == 1500000", {"Price": 1500000.0}, []) is True
+
+    # "ALL" / rỗng → luôn True
+    assert svc.check_condition("ALL", {"Price": 1}, []) is True
+    assert svc.check_condition("", {"Price": 1}, []) is True
+
+
 def test_service_register_temporary_tcgttd(dummy_service):
     success = dummy_service.register_temporary_tcgttd("MS26-01", ["Nguyen Van A"], "Group1", "ID | CCCD", "Opt2")
     assert success is True
-    
+
     df_temp = dummy_service.ds.conn.execute('SELECT * FROM TCGTTD').fetchdf()
     assert len(df_temp) == 1
     assert df_temp.iloc[0]["MemberName"] == "Nguyen Van A"
 
 
+def test_service_register_temporary_tcgttd_fail_no_join(dummy_service):
+    # Opt1 không phải Repeat → không có right_sheet → trả False
+    assert dummy_service.register_temporary_tcgttd("MS26-01", ["Nguyen Van A"], "Group1", "ID", "Opt1") is False
+
+
+def test_service_register_temporary_tcgttd_fail_member_not_found(dummy_service):
+    # Tên thành viên không khớp dữ liệu → trả False, không ghi đè bảng
+    assert dummy_service.register_temporary_tcgttd("MS26-01", ["Khong Ai Ca"], "Group1", "ID | CCCD", "Opt2") is False
+
+
 def test_service_run_preview_composite_key(dummy_service):
     # Đăng ký thành viên tạm trước khi preview
     dummy_service.register_temporary_tcgttd("MS26-01", ["Nguyen Van A"], "Group1", "ID | CCCD", "Opt2")
-    # Preview hoạt động chính xác với composite key
+    # Preview hoạt động chính xác với composite key "ID | CCCD": left_key = ID
     res = dummy_service.run_preview("Opt2", "1. Goi thau 1", ["TemplateB"])
     assert res.startswith("✅ Context:")
-    assert "Tables:" in res
+    # left_key lấy từ "ID | CCCD" → "ID", nên chỉ lọc đúng bảng của gói MS26-01
+    assert "Bang cua MS26-01" in res
+    assert "Bang khac" not in res
+    assert "📋 Tables: không có dòng nào khớp" not in res

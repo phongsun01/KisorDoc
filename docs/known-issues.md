@@ -43,3 +43,29 @@ Bug #2 không phải "engine là dead code — xấu về kiến trúc". Nó ph�
 | 4 | `used_names` tracking | Thấp |
 | 5 | Retry mode (không xóa folder) | Trung bình |
 | 6 | Repeat mode (TCGTTD dynamic) | Cao — phụ thuộc DuckDB session |
+
+---
+
+## Cập nhật kết quả xử lý (v4.0.0 & v4.0.1)
+
+Các vấn đề kiến trúc và lỗi trong danh sách trên đã được giải quyết triệt để trong đợt tái cấu trúc phiên bản 4.0.0 & 4.0.1:
+
+1. **Tái cấu trúc mã nguồn app.py**:
+   - `run_batch`, `run_retry_batch`, `IncrementalRunLogger`, `write_with_retry` đã được di chuyển toàn bộ từ `app.py` sang `kisorlib/batch.py` và `kisorlib/service.py`.
+   - `app.py` được tinh giản từ ~1780 dòng xuống còn ~360 dòng, loại bỏ được global state và chỉ còn làm nhiệm vụ kết nối UI Gradio.
+
+2. **Khắc phục các lỗi vận hành & Hardcode**:
+   - **Sửa lỗi Preview ở chế độ Repeat**: Sửa lỗi composite key_id trong `run_preview`.
+   - **Khắc phục hardcode trong api.py**: Chuyển đổi các cấu hình đường dẫn `"1. Data"` và truy vấn bảng `"GoiThau"` sang sử dụng cấu hình động `cfg.data_path` và `cfg.DataSheet` từ `AppConfig`. Sửa lỗi truyền tham số `excel_files` lỗi thời vào `DataSet`.
+   - **Bảo mật SQL (Parameter Binding)**: Nâng cấp `DataSet.query()` hỗ trợ parameter binding `?`, giải quyết triệt để vấn đề SQL Injection và lỗi cú pháp khi dữ liệu chứa ký tự nháy đơn (`'`).
+
+3. **Bổ sung Unit Tests tự động**:
+   - Viết thêm bộ test chuyên biệt [tests/test_service.py](file:///D:/Antigravity/KisorDoc/tests/test_service.py) chạy trên bộ dữ liệu giả lập in-memory để kiểm thử `KisorService`, Repeat mode, đăng ký thành viên tạm thời và preview composite key.
+
+### Rủi ro bảo mật tiềm ẩn còn lại (SQL Identifier Injection)
+- **Vấn đề**: Mặc dù giá trị dữ liệu đã được tham số hóa an toàn bằng `?`, tên cột (`join_key`, `key_id`) và tên bảng (`right_sheet`) vẫn được nối chuỗi trực tiếp từ cấu hình Excel:
+  ```python
+  f'SELECT * FROM "{right_sheet}_Goc" WHERE "{join_key}" = ?'
+  ```
+- **Khuyến nghị**: Trong tương lai nên bổ sung một hàm whitelist kiểm tra định dạng tên cột/tên bảng (chỉ chấp nhận các ký tự an toàn `^[A-Za-z0-9_\s\-\.\#\u00C0-\u1EF9]+$`) để tránh rủi ro SQL Injection qua cấu hình Excel.
+

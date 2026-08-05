@@ -5,6 +5,7 @@ from kisorlib.utils import (
     clean_config_key,
     parse_join_expression,
     _parse_repeat_key_id,
+    _parse_repeat_sheet_config,
     _parse_row_range,
     _str,
     safe_format,
@@ -58,6 +59,39 @@ def test_parse_join_expression():
     assert parse_join_expression(expr_sql) == expr_sql
 
 
+def test_parse_join_expression_edge_cases():
+    # <*> FULL OUTER JOIN với key khác tên (@ k1 = k2)
+    sql = parse_join_expression("Table1 <*> Table2 @ GoiThau_ID = MemberID")
+    assert "FULL OUTER JOIN" in sql
+    assert '"Table1"."GoiThau_ID" = "Table2"."MemberID"' in sql
+
+    # *> RIGHT JOIN với key khác tên (@ k1 = k2)
+    sql = parse_join_expression("Table1 *> Table2 @ GoiThau_ID = MemberID")
+    assert "RIGHT JOIN" in sql
+    assert '"Table1"."GoiThau_ID" = "Table2"."MemberID"' in sql
+
+    # * INNER JOIN với key khác tên
+    sql = parse_join_expression("Table1 * Table2 @ GoiThau_ID = MemberID")
+    assert "INNER JOIN" in sql
+    assert '"Table1"."GoiThau_ID" = "Table2"."MemberID"' in sql
+
+    # Không có @ → trả về SELECT đơn
+    assert parse_join_expression("Table1") == 'SELECT * FROM "Table1"'
+
+
+def test_parse_repeat_sheet_config():
+    # Giá trị Options.Sheet dạng join rút gọn → (left_sheet, right_sheet, join_key)
+    assert _parse_repeat_sheet_config({"sheet": "GoiThau <* TCGTTD @ GoiThau_ID"}) == ("GoiThau", "TCGTTD", "GoiThau_ID")
+    assert _parse_repeat_sheet_config({"sheet": "GoiThau <*> TCGTTD @ GoiThau_ID"}) == ("GoiThau", "TCGTTD", "GoiThau_ID")
+    assert _parse_repeat_sheet_config({"sheet": "GoiThau *> TCGTTD @ GoiThau_ID"}) == ("GoiThau", "TCGTTD", "GoiThau_ID")
+    assert _parse_repeat_sheet_config({"sheet": "GoiThau * TCGTTD @ GoiThau_ID"}) == ("GoiThau", "TCGTTD", "GoiThau_ID")
+    # Khác tên cột khóa
+    assert _parse_repeat_sheet_config({"sheet": "GoiThau <* TCGTTD @ GoiThau_ID = MemberID"}) == ("GoiThau", "TCGTTD", "GoiThau_ID = MemberID")
+    # Không phải join → sheet đơn, right rỗng
+    assert _parse_repeat_sheet_config({"sheet": "GoiThau"}) == ("GoiThau", "", "")
+    assert _parse_repeat_sheet_config({}) == ("", "", "")
+
+
 def test_parse_repeat_key_id():
     assert _parse_repeat_key_id("") == ("ID", "ID")
     assert _parse_repeat_key_id("GoiThau_ID") == ("GoiThau_ID", "GoiThau_ID")
@@ -76,5 +110,8 @@ def test_safe_eval_condition():
     assert _safe_eval_condition("var_0 == 'Opt1'", {"var_0": "Opt1"}) is True
     assert _safe_eval_condition("var_0 > 1000000", {"var_0": 1500000}) is True
     assert _safe_eval_condition("var_0 > 1000000 and var_1 == 'Active'", {"var_0": 1500000, "var_1": "Active"}) is True
+    assert _safe_eval_condition("var_0 > 1000000 and var_1 == 'Active'", {"var_0": 1500000, "var_1": "Inactive"}) is False
+    assert _safe_eval_condition("var_0 > 1000000 or var_1 == 'Active'", {"var_0": 500000, "var_1": "Active"}) is True
+    assert _safe_eval_condition("var_0 > 1000000 or var_1 == 'Active'", {"var_0": 500000, "var_1": "Inactive"}) is False
     with pytest.raises(ValueError):
         _safe_eval_condition("var_x == 1", {})

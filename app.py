@@ -12,12 +12,11 @@ from kisorlib.batch import run_batch, run_retry_batch
 from kisorlib.file_utils import cleanup_old_logs
 from kisorlib.utils import _str, _parse_repeat_key_id, _parse_repeat_sheet_config, resolve_sheet_query, safe_format
 
-service: KisorService | None = None
 ui_labels: dict = {}
 
 
-def init():
-    global service, ui_labels
+def init() -> KisorService:
+    global ui_labels
     config = load_config()
     ds = DataSet(config)
     
@@ -39,10 +38,11 @@ def init():
         ui_labels = {}
         
     service = KisorService(config, ds)
+    return service
 
 
 def create_ui():
-    init()
+    service = init()
 
     _sel = {"opt": "", "pkg": "", "sheet_rows": [], "template_total": 0}
 
@@ -213,7 +213,8 @@ def create_ui():
             all_tpls = service.get_all_option_templates(opt)
             if not opt:
                 pkgs = []
-                show_group = gr.update(visible=False, choices=[])
+                default_choices = ui_labels.get("repeat_group_choices", [])
+                show_group = gr.update(visible=False, choices=default_choices, value=default_choices[0] if default_choices else None)
             else:
                 opt_config = service.get_option_config(opt)
                 sheet = opt_config.get("sheet", service.config.DataSheet)

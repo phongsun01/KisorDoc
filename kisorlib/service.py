@@ -219,7 +219,7 @@ class KisorService:
             return []
             
         opt_config = self.get_option_config(option_key)
-        key_id = opt_config.get("key_id", "ID")
+        key_id = opt_config.get("key_id") or self.config.DefaultKeyId
         show_format = opt_config.get("show", "")
         if "|" in show_format:
             show_format = show_format.split("|")[0].strip()
@@ -348,7 +348,7 @@ class KisorService:
 
         opt_config = self.get_option_config(option_key)
         sheet = opt_config.get("sheet", self.config.DataSheet)
-        key_id = opt_config.get("key_id", "ID")
+        key_id = opt_config.get("key_id") or self.config.DefaultKeyId
         show_format = opt_config.get("show", "")
         if "|" in show_format:
             show_format = show_format.split("|")[0].strip()
