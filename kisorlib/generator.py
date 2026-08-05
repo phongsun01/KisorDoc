@@ -235,11 +235,12 @@ def generate_one(
             return result
 
         # 1. Copy template → output (với retry)
-        def do_copy():
-            shutil.copy2(str(template_path), str(output_path))
-        write_with_retry(do_copy, max_retries=max_retries, delay=retry_delay,
-                         on_retry=on_progress)
-        _emit(on_progress, "info", f"[1/3] Copy: {template_name}", template=template_name)
+        if template_path.resolve() != output_path.resolve():
+            def do_copy():
+                shutil.copy2(str(template_path), str(output_path))
+            write_with_retry(do_copy, max_retries=max_retries, delay=retry_delay,
+                             on_retry=on_progress)
+            _emit(on_progress, "info", f"[1/3] Copy: {template_name}", template=template_name)
 
         # 2. Detect missing placeholders (trước merge để output warning)
         if table_placeholder_names is not None:
@@ -399,10 +400,11 @@ def generate_one_repeat(
     try:
         dst = cfg.output_path / template_path.name
 
-        def do_copy():
-            shutil.copy2(str(template_path), str(dst))
-        write_with_retry(do_copy, max_retries=max_retries, delay=retry_delay,
-                         on_retry=on_progress)
+        if template_path.resolve() != dst.resolve():
+            def do_copy():
+                shutil.copy2(str(template_path), str(dst))
+            write_with_retry(do_copy, max_retries=max_retries, delay=retry_delay,
+                             on_retry=on_progress)
 
         def do_merge():
             return mail_merge_safe(dst, nested_context, dst)

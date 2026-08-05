@@ -1,5 +1,11 @@
 # Changelog
 
+## [4.1.1] - 2026-08-05
+
+### Fixed
+- **Tránh lỗi tự sao chép tệp tin trên Windows:** Khắc phục lỗi `PermissionError` (Sharing violation) khi core engine cố gắng sao chép một tệp tin đè lên chính nó tại thư mục đầu ra trong `generate_one`, `generate_one_repeat` và `copy_templates_to_output`.
+- **Khắc phục lỗi nạp template cho Quy trình Lặp (Repeat Type):** Chỉnh sửa hàm `get_workflow_templates` để chỉ truy vấn bảng gói thầu (`left_sheet`) khi lấy danh sách template của Quy trình Lặp. Việc này loại bỏ hoàn toàn lỗi cơ sở dữ liệu `BinderException` do bảng thành viên (`TCGTTD`) chưa được tạo cột khóa phụ động (`GoiThau_ID`) ở thời điểm tải cấu hình.
+
 ## [4.1.0] - 2026-08-05
 
 ### Added
@@ -11,22 +17,22 @@
 - **Tái cấu trúc `kisorlib/batch.py`:** Loại bỏ hoàn toàn logic sinh file, merge docx, chỉ giữ lại vai trò async/yield progress wrapper và ghi log Gradio qua `IncrementalRunLogger`.
 - **Tái cấu trúc `kisorlib/engine.py`:** Chuyển đổi gọi trực tiếp xuống core `generator.py` thay vì xử lý merge nội bộ.
 - **Cập nhật `kisorlib/utils.py`:** Loại bỏ các hàm SQL trùng lặp, chỉ giữ lại định dạng chuỗi và AST cơ bản, đồng thời re-export từ `sql_join.py` để tương thích ngược.
-- **Cập nhật Tài liệu Lỗi:** Đánh dấu dual-pipeline đã được xử lý hoàn toàn trong [known-issues.md](file:///D:/Antigravity/KisorDoc/docs/known-issues.md).
+- **Cập nhật Tài liệu Lỗi:** Đánh dấu dual-pipeline đã được xử lý hoàn toàn trong [known-issues.md](docs/known-issues.md).
 
 ## [4.0.3] - 2026-08-05
 
 ### Added
 - **Bảo mật Định danh SQL (SQL Identifier Whitelist):** Bổ sung hàm `validate_sql_identifier` với regex whitelist `^[A-Za-z0-9_\s\-\.\#\u00C0-\u1EF9]+$` để lọc sạch toàn bộ tên bảng và tên cột động đọc từ Excel trước khi thực hiện SQL. Triệt tiêu hoàn toàn nguy cơ SQL Identifier Injection.
-- **Mở rộng Unit Tests:** Bổ sung các test case trong [test_utils.py](file:///D:/Antigravity/KisorDoc/tests/test_utils.py#L118) kiểm chứng hoạt động của hàm whitelist với các chuỗi độc hại.
+- **Mở rộng Unit Tests:** Bổ sung các test case trong [test_utils.py](tests/test_utils.py#L118) kiểm chứng hoạt động của hàm whitelist với các chuỗi độc hại.
 
 ### Changed
-- **Cập nhật Tài liệu Lỗi:** Đánh dấu lỗi SQL Identifier Injection đã được khắc phục hoàn toàn trong [known-issues.md](file:///D:/Antigravity/KisorDoc/docs/known-issues.md#L65).
+- **Cập nhật Tài liệu Lỗi:** Đánh dấu lỗi SQL Identifier Injection đã được khắc phục hoàn toàn trong [known-issues.md](docs/known-issues.md#L65).
 
 ## [4.0.2] - 2026-08-05
 
 ### Changed
 - **Tài liệu hóa các vấn đề kiến trúc (known-issues.md):** Cập nhật tình hình sửa lỗi kiến trúc, dọn dẹp hardcode, bảo mật SQL Parameter Binding và ghi nhận rủi ro SQL Identifier Injection tiềm ẩn.
-- **Tổng quát hóa giao diện:** Cập nhật mặc định nhóm lặp trong [ui_labels.json](file:///D:/Antigravity/KisorDoc/ui_labels.json) từ gán cứng `"Tổ chuyên gia" / "Tổ thẩm định"` thành `"Nhóm lặp 1" / "Nhóm lặp 2"`.
+- **Tổng quát hóa giao diện:** Cập nhật mặc định nhóm lặp trong [ui_labels.json](ui_labels.json) từ gán cứng `"Tổ chuyên gia" / "Tổ thẩm định"` thành `"Nhóm lặp 1" / "Nhóm lặp 2"`.
 
 ### Fixed
 - **Sửa lỗi đồng bộ Radio State của Gradio:** Khắc phục lỗi `gradio.exceptions.Error` khi khởi tạo/reset app về quy trình trống bằng cách khôi phục lại các lựa chọn mặc định và giá trị hợp lệ cho `group_radio`.

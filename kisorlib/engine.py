@@ -266,7 +266,8 @@ def generate_documents(
         if not request.dry_run:
             import shutil
             try:
-                shutil.copy2(str(tpl_path), str(out_copy))
+                if tpl_path.resolve() != out_copy.resolve():
+                    shutil.copy2(str(tpl_path), str(out_copy))
             except Exception as exc:
                 _emit(cb, LEVEL_ERROR, f"Lỗi copy template '{tpl_name}': {exc}")
                 skipped_results.append(FileResult(

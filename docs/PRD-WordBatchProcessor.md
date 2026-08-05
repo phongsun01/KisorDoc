@@ -1083,14 +1083,14 @@ F5 (Version pin)    ← Nice-to-have, làm cuối
 *   **Kiểm thử dịch vụ [tests/test_service.py](tests/test_service.py):** Bổ sung unit tests cho `KisorService`, kiểm tra Repeat mode, đăng ký bảng thành viên tạm thời và preview composite key.
 
 ### 13.6 Bản vá 4.0.2 (Động hóa lựa chọn lặp & Sửa lỗi Radio State của Gradio)
-*   **Tổng quát hóa bộ chọn lặp:** Đổi mặc định nhóm lặp trong [ui_labels.json](file:///D:/Antigravity/KisorDoc/ui_labels.json) từ gán cứng `"Tổ chuyên gia" / "Tổ thẩm định"` thành `"Nhóm lặp 1" / "Nhóm lặp 2"`.
+*   **Tổng quát hóa bộ chọn lặp:** Đổi mặc định nhóm lặp trong [ui_labels.json](ui_labels.json) từ gán cứng `"Tổ chuyên gia" / "Tổ thẩm định"` thành `"Nhóm lặp 1" / "Nhóm lặp 2"`.
 *   **Sửa lỗi đồng bộ Radio State của Gradio:** Khắc phục lỗi `gradio.exceptions.Error` khi khởi tạo/reset app về quy trình trống bằng cách khôi phục lại các lựa chọn mặc định và giá trị hợp lệ cho `group_radio`.
-*   **Cập nhật tài liệu lỗi [known-issues.md](file:///D:/Antigravity/KisorDoc/docs/known-issues.md):** Bổ sung kết quả xử lý và phân tích rủi ro bảo mật tiềm ẩn SQL Identifier Injection.
+*   **Cập nhật tài liệu lỗi [known-issues.md](known-issues.md):** Bổ sung kết quả xử lý và phân tích rủi ro bảo mật tiềm ẩn SQL Identifier Injection.
 
 ### 13.7 Bản vá 4.0.3 (Whitelist định danh SQL - SQL Identifier Whitelist)
 *   **Whitelist định danh SQL:** Tích hợp hàm `validate_sql_identifier` với regex whitelist `^[A-Za-z0-9_\s\-\.\#\u00C0-\u1EF9]+$` để lọc sạch toàn bộ tên bảng và cột động đọc từ Excel trước khi đưa vào SQL, triệt tiêu hoàn toàn nguy cơ SQL Identifier Injection.
 *   **Mở rộng Unit Tests:** Thêm các test case trong [test_utils.py](tests/test_utils.py) để kiểm chứng bộ lọc an toàn với các trường hợp inject ký tự độc hại.
-*   **Cập nhật Tài liệu Lỗi:** Đánh dấu lỗi SQL Identifier Injection đã được khắc phục hoàn toàn trong [known-issues.md](file:///D:/Antigravity/KisorDoc/docs/known-issues.md).
+*   **Cập nhật Tài liệu Lỗi:** Đánh dấu lỗi SQL Identifier Injection đã được khắc phục hoàn toàn trong [known-issues.md](known-issues.md).
 
 
 

@@ -44,7 +44,7 @@ Công cụ Python xử lý hàng loạt tài liệu Word (Mail Merge & Copy bả
 ├── 3. Files/           # Thư mục đầu ra (Output)
 ```
 
-### Cấu trúc mã nguồn (kể từ v4.0.0)
+### Cấu trúc mã nguồn (kể từ v4.1.0)
 
 ```text
 KisorDoc/
@@ -55,7 +55,9 @@ KisorDoc/
 │   ├── config.py       # AppConfig (Pydantic) + load_config từ .env
 │   ├── service.py      # KisorService: nghiệp vụ, Dependency Injection (không global state)
 │   ├── engine.py       # Public API mail-merge & dry-run (Pydantic models)
-│   ├── batch.py        # run_batch / run_retry_batch hàng loạt
+│   ├── generator.py    # Core sync: sinh tài liệu (single source of truth cho UI & API)
+│   ├── sql_join.py     # Hàm xử lý SQL Join (parse_join_expression, resolve_sheet_query, ...)
+│   ├── batch.py        # run_batch / run_retry_batch hàng loạt (adapter cho generator)
 │   ├── dataset.py      # Nạp Excel vào DuckDB (cache, join, gộp sheet trùng tên)
 │   ├── table_copier.py # Copy bảng Excel → Word (giữ định dạng, merge cell)
 │   ├── merger.py       # Mail merge Jinja2 + filters
@@ -63,7 +65,7 @@ KisorDoc/
 │   ├── file_utils.py   # Xử lý file, retry khi bị Word chiếm dụng
 │   ├── utils.py        # Hàm tiện ích thuần túy (pure functions)
 │   └── app_helpers.py  # Helper dùng chung cho app.py & engine.py
-├── tests/              # Unit tests tự động (test_utils, test_filters, ...)
+├── tests/              # Unit tests tự động (test_utils, test_filters, test_generator, ...)
 └── ui_labels.json      # Nhãn giao diện có thể tùy chỉnh
 ```
 

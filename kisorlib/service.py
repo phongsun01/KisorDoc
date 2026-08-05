@@ -230,7 +230,11 @@ class KisorService:
             main_rows = sheet_rows
         else:
             sheet = opt_config.get("sheet", self.config.DataSheet)
-            sql = resolve_sheet_query(sheet)
+            if opt_config.get("type") == "Repeat":
+                left_sheet, _, _ = _parse_repeat_sheet_config(opt_config)
+                sql = f'SELECT * FROM "{left_sheet}"' if left_sheet else resolve_sheet_query(sheet)
+            else:
+                sql = resolve_sheet_query(sheet)
             try:
                 main_rows = self.ds.query(sql)
             except Exception:

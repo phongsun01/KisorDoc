@@ -60,7 +60,7 @@ Các vấn đề kiến trúc và lỗi trong danh sách trên đã được gi�
    - **Bảo mật SQL (Parameter Binding)**: Nâng cấp `DataSet.query()` hỗ trợ parameter binding `?`, giải quyết triệt để vấn đề SQL Injection và lỗi cú pháp khi dữ liệu chứa ký tự nháy đơn (`'`).
 
 3. **Bổ sung Unit Tests tự động**:
-   - Viết thêm bộ test chuyên biệt [tests/test_service.py](file:///D:/Antigravity/KisorDoc/tests/test_service.py) chạy trên bộ dữ liệu giả lập in-memory để kiểm thử `KisorService`, Repeat mode, đăng ký thành viên tạm thời và preview composite key.
+   - Viết thêm bộ test chuyên biệt [tests/test_service.py](tests/test_service.py) chạy trên bộ dữ liệu giả lập in-memory để kiểm thử `KisorService`, Repeat mode, đăng ký thành viên tạm thời và preview composite key.
 
 ### Bảo mật SQL (SQL Identifier Injection - Đã giải quyết ở v4.0.3)
 - **Vấn đề**: Trước đây, mặc dù giá trị dữ liệu đã được tham số hóa an toàn bằng `?`, tên cột (`join_key`, `key_id`) và tên bảng (`right_sheet`) vẫn được nối chuỗi trực tiếp từ cấu hình Excel.
