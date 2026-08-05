@@ -4,6 +4,14 @@ import ast
 
 _JOIN_RE = re.compile(r'.+\s+(?:<\*>|<\*|\*>|\*)\s+.+\s*@\s*.+', re.DOTALL)
 
+# Bảng ánh xạ toán tử join rút gọn → SQL JOIN (thứ tự ưu tiên: <*> trước <* trước *> trước *)
+_OP_MAP = [
+    (" <*>", "FULL OUTER JOIN"),
+    (" <*",  "LEFT JOIN"),
+    (" *>",  "RIGHT JOIN"),
+    (" *",   "INNER JOIN"),
+]
+
 
 def _str(val, default="") -> str:
     if val is None:
@@ -174,12 +182,6 @@ def parse_join_expression(expr: str) -> str:
     join_part = join_part.strip()
     key_raw   = key_raw.strip()
 
-    _OP_MAP = [
-        (" <*>", "FULL OUTER JOIN"),
-        (" <*",  "LEFT JOIN"),
-        (" *>",  "RIGHT JOIN"),
-        (" *",   "INNER JOIN"),
-    ]
     join_type = None
     t1 = t2 = ""
     for sym, jt in _OP_MAP:
@@ -241,13 +243,7 @@ def _parse_repeat_sheet_config(opt_config: dict) -> tuple[str, str, str]:
     join_part = join_part.strip()
     join_key  = key_raw.strip()
 
-    # Dùng _OP_MAP (theo thứ tự ưu tiên: <*> trước <* trước *> trước *)
-    _OP_MAP = [
-        (" <*>", "FULL OUTER JOIN"),
-        (" <*",  "LEFT JOIN"),
-        (" *>",  "RIGHT JOIN"),
-        (" *",   "INNER JOIN"),
-    ]
+    # Dùng chung constant _OP_MAP (theo thứ tự ưu tiên: <*> trước <* trước *> trước *)
     for sym, _ in _OP_MAP:
         if sym in join_part:
             left, right = join_part.split(sym.strip(), 1)

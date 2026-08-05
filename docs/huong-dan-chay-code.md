@@ -1,6 +1,6 @@
-# Hướng dẫn chạy chương trình KisorDoc-AI từ file main.py
+# Hướng dẫn chạy chương trình KisorDoc-AI từ file runner.py
 
-Tài liệu này hướng dẫn chi tiết cách thiết lập môi trường và chạy ứng dụng KisorDoc-AI trực tiếp từ file nguồn `main.py`.
+Tài liệu này hướng dẫn chi tiết cách thiết lập môi trường và chạy ứng dụng KisorDoc-AI thông qua entry point `runner.py` (khởi chạy song song Gradio UI và FastAPI API).
 
 ---
 
@@ -36,9 +36,7 @@ pip install -r requirements.txt
 ```
 
 ### Bước 2.3: Thiết lập cấu hình (Tùy chọn)
-Chương trình hỗ trợ 2 nguồn cấu hình:
-1. **Config-5.txt (Mặc định):** Đọc từ thư mục hệ thống `%LOCALAPPDATA%\UiPathProjectConfigs\Config-5.txt`.
-2. **File .env (Ưu tiên cao hơn):** Tạo file `.env` ngay tại thư mục gốc của dự án (`D:\Antigravity\KisorDoc`) để ghi đè cấu hình. Định dạng mẫu:
+Tạo file `.env` ngay tại thư mục gốc của dự án (`D:\Antigravity\KisorDoc`) — copy từ mẫu `.env-example`. Chương trình tự động load file này khi khởi động. Định dạng mẫu:
    ```env
    PROJECT_PATH=D:\Antigravity\1. Thanh toan nho
    ONLINE_MODE=Disable
@@ -50,19 +48,40 @@ Chương trình hỗ trợ 2 nguồn cấu hình:
    TASK_MANAGER_PROCESS=WINWORD.exe
    EXCEPTION_SHEET=S.
    APP_NAME=KisorDoc-AI
+   EXCEL_TO_WORD_WIDTH_FACTOR=90
+   FILE_RETRY_DELAY=2.0
+   FILE_MAX_RETRIES=3
+   DANH_MUC_FILE=DanhMuc
+   DEFAULT_SHOW={TT}
+   DEFAULT_KEY_ID=ID
    ```
 
-### Bước 2.3: Khởi chạy file runner.py
-Chạy tập lệnh chính bằng lệnh:
+### Bước 2.4: Khởi chạy ứng dụng
+Chạy entry point chính bằng lệnh:
 ```bash
 python runner.py
 ```
 
 Khi khởi chạy thành công, giao diện dòng lệnh sẽ xuất hiện thông báo:
 ```text
-KisorDoc-AI running at http://127.0.0.1:7864
+========================================
+         KisorDoc dang khoi dong
+----------------------------------------
+  Gradio UI : http://127.0.0.1:7864
+  FastAPI   : http://127.0.0.1:8000
+  API Docs  : http://127.0.0.1:8000/docs
+========================================
 ```
-Đồng thời, hệ thống sẽ tự động mở một tab mới trên trình duyệt mặc định của bạn dẫn đến địa chỉ trên để bạn thao tác trực tiếp trên giao diện đồ họa (Gradio UI).
+
+Chương trình khởi chạy đồng thời:
+* **Gradio UI** tại `http://127.0.0.1:7864` — giao diện đồ họa thao tác trực quan (Chọn Gói thầu -> Chọn template -> Chạy & Xem log).
+* **FastAPI API** tại `http://127.0.0.1:8000` — tài liệu Swagger tự động tại `/docs`, hỗ trợ các endpoint `/generate`, `/templates`, `/packages`, `/jobs/*`.
+
+Có thể chạy độc lập từng thành phần:
+```bash
+python app.py                    # chỉ Gradio UI
+uvicorn api:app --host 0.0.0.0 --port 8000   # chỉ FastAPI API
+```
 
 ---
 
@@ -102,7 +121,7 @@ KisorDoc-AI running at http://127.0.0.1:7864
   2. **Sử dụng bộ chạy phụ trợ (Python Launcher):** Chạy lệnh sử dụng lệnh `py` thay vì `python`:
      ```bash
      py -m venv .venv
-     py main.py
+     py runner.py
      ```
   3. **Chạy bằng đường dẫn tuyệt đối:** Sử dụng đường dẫn trực tiếp tới thư mục cài đặt Python trên máy của bạn (Ví dụ trên máy của bạn):
      - **Trên PowerShell:**

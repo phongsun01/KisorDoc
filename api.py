@@ -239,15 +239,9 @@ def _resolve_package_id(option: str, package_label: str) -> str:
     # Import lazy
     from kisorlib.config import load_config          # type: ignore
     from kisorlib.dataset import DataSet             # type: ignore
-    from kisorlib.engine import _find_excel_files    # type: ignore
 
     cfg = load_config()
-    data_dir = Path(cfg.ProjectPath) / "1. Data"
-    excel_files = _find_excel_files(data_dir)
-    if not excel_files:
-        return package_label  # fallback
-
-    ds = DataSet(cfg, excel_files=[str(p) for p in excel_files])
+    ds = DataSet(cfg)
 
     # Đọc option config để lấy show_format và key_id
     try:
@@ -267,7 +261,7 @@ def _resolve_package_id(option: str, package_label: str) -> str:
 
     # Query GoiThau rows và tìm dòng khớp label
     try:
-        rows = ds.query('SELECT * FROM "GoiThau"')
+        rows = ds.query(f'SELECT * FROM "{cfg.DataSheet}"')
     except Exception:
         return package_label
 
@@ -311,14 +305,9 @@ def get_options():
     try:
         from kisorlib.config import load_config      # type: ignore
         from kisorlib.dataset import DataSet         # type: ignore
-        from kisorlib.engine import _find_excel_files  # type: ignore
 
         cfg = load_config()
-        data_dir = Path(cfg.ProjectPath) / "1. Data"
-        excel_files = _find_excel_files(data_dir)
-        if not excel_files:
-            return []
-        ds = DataSet(cfg, excel_files=[str(p) for p in excel_files])
+        ds = DataSet(cfg)
         rows = ds.query("SELECT Key, Value FROM Options ORDER BY Key")
         return [
             {"key": str(r.get("Key", "")).strip(),

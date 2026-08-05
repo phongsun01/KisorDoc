@@ -49,8 +49,11 @@ class DataSet:
 
             wb.close()
 
-    def query(self, sql: str) -> list[dict]:
-        df = self.conn.execute(sql).fetchdf()
+    def query(self, sql: str, params=None) -> list[dict]:
+        if params is not None:
+            df = self.conn.execute(sql, params).fetchdf()
+        else:
+            df = self.conn.execute(sql).fetchdf()
         cols = list(df.columns)
         if len(cols) != len(set(cols)):
             dupes = {c for c in cols if cols.count(c) > 1}

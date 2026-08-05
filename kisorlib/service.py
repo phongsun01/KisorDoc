@@ -187,7 +187,7 @@ class KisorService:
         if key_id is None:
             key_id = self.config.DefaultKeyId
         try:
-            rows = self.ds.query(f"SELECT DISTINCT File FROM Tables WHERE \"{key_id}\" = '{goi_thau_id}' AND File IS NOT NULL AND File != 'nan'")
+            rows = self.ds.query(f'SELECT DISTINCT File FROM Tables WHERE "{key_id}" = ? AND File IS NOT NULL AND File != \'nan\'', (goi_thau_id,))
             if rows:
                 filename = str(rows[0]['File']).strip()
                 if filename:
@@ -272,9 +272,8 @@ class KisorService:
 
         try:
             if join_key and goi_thau_id:
-                safe_id = str(goi_thau_id).replace("'", "''")
                 try:
-                    rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc" WHERE "{join_key}" = \'{safe_id}\'')
+                    rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc" WHERE "{join_key}" = ?', (goi_thau_id,))
                 except Exception:
                     rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc"')
             else:
@@ -313,9 +312,8 @@ class KisorService:
 
         try:
             if join_key and goi_thau_id:
-                safe_id = str(goi_thau_id).replace("'", "''")
                 try:
-                    all_rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc" WHERE "{join_key}" = \'{safe_id}\'')
+                    all_rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc" WHERE "{join_key}" = ?', (goi_thau_id,))
                 except Exception:
                     all_rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc"')
             else:

@@ -1,5 +1,5 @@
 """
-kisordoc/engine.py  — PATCHED
+kisorlib/engine.py  — PATCHED
 ──────────────────────────────
 Fixes so với version cũ:
   #1  Package import: relative import đúng (engine.py nằm trong kisorlib/)

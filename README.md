@@ -23,8 +23,10 @@ Công cụ Python xử lý hàng loạt tài liệu Word (Mail Merge & Copy bả
    - **Gộp sheet trùng tên:** Tự động gộp dữ liệu từ nhiều file Excel khi phát hiện sheet trùng tên trong DataSet.
    - **Cảnh báo trùng tên cột:** Hiển thị cảnh báo trực quan trên log UI khi phát hiện các cột trùng tên giữa các bảng được join.
 
-4. **Giao diện Web Local (Gradio):**
-   - Thao tác trực quan qua 3 bước: Chọn Gói thầu -> Chọn template -> Chạy & Xem log.
+4. **Giao diện Web Local (Gradio) + REST API (FastAPI):**
+   - UI Gradio thao tác trực quan qua 3 bước: Chọn Gói thầu -> Chọn template -> Chạy & Xem log.
+   - FastAPI REST API (Swagger tự động tại `http://127.0.0.1:8000/docs`) với các endpoint `/generate`, `/templates`, `/packages`, `/jobs/*`.
+   - Khởi chạy đồng thời cả hai qua một lệnh duy nhất `python runner.py`.
 
 5. **Quy trình chạy lặp hàng loạt (Repeat Mode):**
    - Hỗ trợ chạy hàng loạt nhiều dòng dữ liệu cho 1 file template thông qua bộ nhận diện `Type` = `Repeat` trong sheet `Options` (Ví dụ: xuất cam kết cho từng thành viên của Tổ chuyên gia/Tổ thẩm định).
@@ -33,11 +35,36 @@ Công cụ Python xử lý hàng loạt tài liệu Word (Mail Merge & Copy bả
 
 ## Cấu trúc thư mục
 
+### Thư mục dữ liệu (tạo tại `PROJECT_PATH`)
+
 ```text
 {ProjectPath}/
 ├── 1. Data/            # Chứa các file dữ liệu Excel (.xlsx)
 ├── 2. Templates/       # Chứa các template Word (.docx), chia theo Opt1/Opt2
 ├── 3. Files/           # Thư mục đầu ra (Output)
+```
+
+### Cấu trúc mã nguồn (kể từ v4.0.0)
+
+```text
+KisorDoc/
+├── runner.py           # Entry point: chạy song song Gradio UI (7864) + FastAPI (8000)
+├── app.py              # UI Gradio (~360 dòng, chỉ kết nối giao diện)
+├── api.py              # FastAPI REST API, Swagger tại /docs
+├── kisorlib/           # Core library (độc lập với Gradio)
+│   ├── config.py       # AppConfig (Pydantic) + load_config từ .env
+│   ├── service.py      # KisorService: nghiệp vụ, Dependency Injection (không global state)
+│   ├── engine.py       # Public API mail-merge & dry-run (Pydantic models)
+│   ├── batch.py        # run_batch / run_retry_batch hàng loạt
+│   ├── dataset.py      # Nạp Excel vào DuckDB (cache, join, gộp sheet trùng tên)
+│   ├── table_copier.py # Copy bảng Excel → Word (giữ định dạng, merge cell)
+│   ├── merger.py       # Mail merge Jinja2 + filters
+│   ├── filters.py      # Bộ lọc định dạng (|date, |number, |num2text, ...)
+│   ├── file_utils.py   # Xử lý file, retry khi bị Word chiếm dụng
+│   ├── utils.py        # Hàm tiện ích thuần túy (pure functions)
+│   └── app_helpers.py  # Helper dùng chung cho app.py & engine.py
+├── tests/              # Unit tests tự động (test_utils, test_filters, ...)
+└── ui_labels.json      # Nhãn giao diện có thể tùy chỉnh
 ```
 
 ## Hướng dẫn cài đặt và khởi chạy
@@ -51,4 +78,12 @@ Công cụ Python xử lý hàng loạt tài liệu Word (Mail Merge & Copy bả
    ```bash
    python runner.py
    ```
-   Ứng dụng sẽ khởi chạy tại cổng mặc định `http://127.0.0.1:7864`.
+   Ứng dụng sẽ khởi chạy đồng thời:
+   - Gradio UI: `http://127.0.0.1:7864`
+   - FastAPI & Swagger docs: `http://127.0.0.1:8000/docs`
+
+   Nếu muốn chạy độc lập từng phần:
+   ```bash
+   python app.py   # chỉ Gradio UI
+   uvicorn api:app --host 0.0.0.0 --port 8000   # chỉ FastAPI API
+   ```

@@ -1,7 +1,6 @@
 import asyncio
 import os
 import sys
-import socket
 import traceback
 from pathlib import Path
 import gradio as gr
@@ -446,18 +445,9 @@ def create_ui():
 
 
 if __name__ == "__main__":
-    app = create_ui()
-    PORT = 7864
-    while True:
-        if PORT > 7900:
-            raise RuntimeError("Không tìm thấy port trống (7864–7900)")
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.bind(('127.0.0.1', PORT))
-            sock.close()
-            break
-        except OSError:
-            PORT += 1
+    from runner import _find_free_port
 
+    app = create_ui()
+    PORT = _find_free_port(int(os.environ.get("GRADIO_PORT", 7864)))
     print(f"KisorDoc-AI running at http://127.0.0.1:{PORT}")
     app.launch(server_port=PORT, share=False, quiet=True, inbrowser=False)

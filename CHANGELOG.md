@@ -1,17 +1,26 @@
 # Changelog
 
+## [4.0.1] - 2026-08-05
+
+### Changed
+- **Nâng cấp bảo mật SQL (Parameter Binding):** Chuyển đổi toàn bộ các câu lệnh SQL ghép chuỗi giá trị trong `kisorlib/service.py` sang parameter binding `?` của DuckDB để ngăn chặn SQL Injection và lỗi cú pháp dữ liệu chứa nháy đơn.
+- **Dọn dẹp hardcode còn lại trong api.py:** Cập nhật `api.py` sử dụng thuộc tính đường dẫn động `cfg.data_path` và tên bảng động `cfg.DataSheet`, đồng thời sửa lỗi khởi tạo `DataSet` truyền tham số `excel_files` không còn được hỗ trợ.
+
+### Added
+- **Mở rộng Unit Tests:** Bổ sung file test chuyên biệt [tests/test_service.py](file:///D:/Antigravity/KisorDoc/tests/test_service.py) để bao phủ `KisorService`, Repeat mode, đăng ký bảng tạm thành viên và preview composite key.
+
 ## [4.0.0] - 2026-08-05
 
 ### Changed
 - **Tái cấu trúc mã nguồn app.py toàn diện:** Phân rã file `app.py` khổng lồ dài ~1780 dòng thành các module nhỏ, đơn nhiệm bên trong thư mục `kisorlib/` để nâng cao chất lượng code và dễ bảo trì:
-  - [kisorlib/utils.py](file:///D:/Antigravity/KisorDoc/kisorlib/utils.py): Các hàm tiện ích thuần túy (pure functions).
-  - [kisorlib/service.py](file:///D:/Antigravity/KisorDoc/kisorlib/service.py): Lớp nghiệp vụ `KisorService` loại bỏ global state `config`/`ds` thông qua Dependency Injection.
-  - [kisorlib/batch.py](file:///D:/Antigravity/KisorDoc/kisorlib/batch.py): Hàm sinh tài liệu hàng loạt `run_batch` và `run_retry_batch` độc lập hoàn toàn với thư viện Gradio.
-  - [app.py](file:///D:/Antigravity/KisorDoc/app.py): Rút gọn xuống chỉ còn ~360 dòng đóng vai trò kết nối UI Gradio.
+  - [kisorlib/utils.py](kisorlib/utils.py): Các hàm tiện ích thuần túy (pure functions).
+  - [kisorlib/service.py](kisorlib/service.py): Lớp nghiệp vụ `KisorService` loại bỏ global state `config`/`ds` thông qua Dependency Injection.
+  - [kisorlib/batch.py](kisorlib/batch.py): Hàm sinh tài liệu hàng loạt `run_batch` và `run_retry_batch` độc lập hoàn toàn với thư viện Gradio.
+  - [app.py](app.py): Rút gọn xuống chỉ còn ~360 dòng đóng vai trò kết nối UI Gradio.
 - **Dọn dẹp mã trùng lặp trong engine.py:** Xóa bỏ các hàm clone trùng lặp trước đó (`_clean_config_key`, `_get_option_config_from_ds`) trong `kisorlib/engine.py` và tái sử dụng trực tiếp từ `utils.py` và `service.py`.
 
 ### Added
-- **Unit Tests tự động:** Bổ sung thư mục kiểm thử `tests/` với các bộ test tự động [tests/test_utils.py](file:///D:/Antigravity/KisorDoc/tests/test_utils.py) và [tests/test_filters.py](file:///D:/Antigravity/KisorDoc/tests/test_filters.py) giúp chạy hồi quy nhanh chóng.
+- **Unit Tests tự động:** Bổ sung thư mục kiểm thử `tests/` với các bộ test tự động [tests/test_utils.py](tests/test_utils.py) và [tests/test_filters.py](tests/test_filters.py) giúp chạy hồi quy nhanh chóng.
 
 ### Fixed
 - **Sửa lỗi Preview ở chế độ Repeat:** Khắc phục triệt để lỗi phân tích sai ID gói thầu dạng composite (`key_id` chứa `|`) trong chức năng Preview (`run_preview`).
