@@ -1,5 +1,10 @@
 # Changelog
 
+## [4.1.2] - 2026-08-05
+
+### Added
+- **Đuôi file mặc định cho cột File khi copy bảng:** Hỗ trợ tự động điền đuôi tệp tin `.xlsx` nếu tên file khai báo trong cột `File` của bảng cấu hình bị thiếu phần mở rộng.
+
 ## [4.1.1] - 2026-08-05
 
 ### Fixed

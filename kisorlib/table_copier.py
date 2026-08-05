@@ -93,6 +93,8 @@ def copy_tables_for_file(
             source_file = xlsx_path
             file_val = str(occ.get("File", "")).strip()
             if file_val and file_val.lower() != "none" and file_val != "":
+                if not Path(file_val).suffix:
+                    file_val += ".xlsx"
                 resolved_file = xlsx_path.parent / file_val
                 if resolved_file.exists():
                     source_file = resolved_file
