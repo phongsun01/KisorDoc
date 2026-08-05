@@ -52,10 +52,10 @@ Chương trình hỗ trợ 2 nguồn cấu hình:
    APP_NAME=KisorDoc-AI
    ```
 
-### Bước 2.3: Khởi chạy file main.py
+### Bước 2.3: Khởi chạy file runner.py
 Chạy tập lệnh chính bằng lệnh:
 ```bash
-python main.py
+python runner.py
 ```
 
 Khi khởi chạy thành công, giao diện dòng lệnh sẽ xuất hiện thông báo:

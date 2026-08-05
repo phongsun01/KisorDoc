@@ -183,7 +183,9 @@ class KisorService:
                 return details
         return {}
 
-    def get_package_excel_file(self, goi_thau_id: str, key_id: str = "GoiThau_ID") -> Path | None:
+    def get_package_excel_file(self, goi_thau_id: str, key_id: str | None = None) -> Path | None:
+        if key_id is None:
+            key_id = self.config.DefaultKeyId
         try:
             rows = self.ds.query(f"SELECT DISTINCT File FROM Tables WHERE \"{key_id}\" = '{goi_thau_id}' AND File IS NOT NULL AND File != 'nan'")
             if rows:

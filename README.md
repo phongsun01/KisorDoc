@@ -49,6 +49,6 @@ Công cụ Python xử lý hàng loạt tài liệu Word (Mail Merge & Copy bả
 2. Copy `.env-example` thành `.env` và điền các biến môi trường phù hợp (xem hướng dẫn trong file).
 3. Chạy ứng dụng:
    ```bash
-   python main.py
+   python runner.py
    ```
    Ứng dụng sẽ khởi chạy tại cổng mặc định `http://127.0.0.1:7864`.
