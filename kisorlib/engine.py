@@ -1,26 +1,20 @@
 """
-kisorlib/engine.py  — PATCHED
-──────────────────────────────
-Fixes so với version cũ:
-  #1  Package import: relative import đúng (engine.py nằm trong kisorlib/)
-  #3  _build_context: bỏ method ảo query_row/query_option,
-      viết lại dùng ds.query() + ds.query_rows(sheet, start, end)
-  #4  list_packages: bỏ ds.list_package_ids(), thay bằng ds.query()
-  #5  copy_tables_for_file: đúng 6 tham số như table_copier.py thực tế
-  #6  DataSet(cfg) — bỏ tham số excel_files không tồn tại
+kisorlib/engine.py — Refactor v3.2
+────────────────────────────────────
+Pydantic I/O + job/log adapter cho REST API.
+
+KHÔNG còn logic merge/copy/retry nội bộ:
+tất cả đi qua generator.generate_many.
 """
 
 from __future__ import annotations
 
 import logging
-import shutil
 import time
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List, Optional
-from .service import KisorService
-from .utils import clean_config_key
 
 from pydantic import BaseModel, field_validator
 
@@ -56,24 +50,15 @@ class GenerateRequest(BaseModel):
 
 
 @dataclass
-class FileResult:
-    template_name:   str
-    output_path:     Optional[str]  = None
-    success:         bool           = False
-    error:           Optional[str]  = None
-    dry_run_context: Optional[dict] = None
-
-
-@dataclass
 class GenerateResult:
     success:          bool
-    files:            List[FileResult] = field(default_factory=list)
-    total:            int              = 0
-    succeeded:        int              = 0
-    failed:           int              = 0
-    skipped:          int              = 0
-    duration_seconds: float            = 0.0
-    error:            Optional[str]    = None
+    files:            List = field(default_factory=list)   # List[FileResult]
+    total:            int  = 0
+    succeeded:        int  = 0
+    failed:           int  = 0
+    skipped:          int  = 0
+    duration_seconds: float = 0.0
+    error:            Optional[str] = None
 
     @property
     def output_paths(self) -> List[str]:
@@ -109,9 +94,9 @@ def _emit(callback: ProgressCallback, level: str, message: str, **extra) -> None
 
 def _resolve_paths(req: GenerateRequest):
     """Trả về (data_dir, templates_dir, output_dir, cfg)."""
-    from .config import load_config  # type: ignore  # FIX #1
-    cfg = load_config()
-    data_dir      = cfg.data_path      if not req.excel_path  else Path(req.excel_path).parent
+    from .config import load_config
+    cfg           = load_config()
+    data_dir      = cfg.data_path      if not req.excel_path else Path(req.excel_path).parent
     templates_dir = cfg.template_path
     output_dir    = cfg.output_path    if not req.output_dir  else Path(req.output_dir)
     return data_dir, templates_dir, output_dir, cfg
@@ -124,12 +109,12 @@ def _find_template_file(templates_dir: Path, option: str, template_name: str) ->
     flat = templates_dir / f"{template_name}.docx"
     if flat.exists():
         return flat
-    # Glob fallback — giống app.py dòng 949
     possible = list((templates_dir / option).glob(f"{template_name}*.docx"))
     return possible[0] if possible else None
 
 
 def _prepare_output_dir(output_dir: Path, cb: ProgressCallback) -> None:
+    import shutil
     if output_dir.exists():
         backup_root = output_dir.parent / "_backup"
         backup_root.mkdir(exist_ok=True)
@@ -140,185 +125,67 @@ def _prepare_output_dir(output_dir: Path, cb: ProgressCallback) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
 
-
-
-# FIX #3: Viết lại hoàn toàn — không còn method ảo nào
-def _build_context(ds, req: GenerateRequest, cfg, cb: ProgressCallback) -> Optional[dict]:
+def _build_context_for_request(ds, req: GenerateRequest, cfg, cb: ProgressCallback):
     """
-    Build Jinja2 context từ DataSet.
-    Logic y hệt run_batch trong app.py (dòng 1008–1054), không có gì mới.
+    Resolve package row + config rows, trả về (flat_ctx, selected_pkg, key_id, left_key).
+    Logic map tập trung qua KisorService + generator.build_context.
     """
-    import math as _math
-    import pandas as _pd
-    from datetime import datetime as _dt
+    import re as _re
+    from .service import KisorService
+    from .generator import build_context
+    from .utils import _parse_repeat_key_id, resolve_sheet_query
 
     opt_config = KisorService(cfg, ds).get_option_config(req.option)
     sheet      = opt_config.get("sheet", "GoiThau")
     key_id     = opt_config.get("key_id", "ID")
+    left_key, _ = _parse_repeat_key_id(key_id)
 
-    # Query GoiThau (hoặc sheet tương đương)
     try:
-        goi_thau_rows = ds.query(f'SELECT * FROM "{sheet}"')
+        goi_thau_rows = ds.query(resolve_sheet_query(sheet))
     except Exception as exc:
         _emit(cb, LEVEL_ERROR, f"Lỗi query sheet '{sheet}': {exc}")
-        return None
+        return None, None, key_id, left_key
 
     selected_pkg = next(
         (r for r in goi_thau_rows
-         if str(r.get(key_id, "")).strip() == req.package_id),
+         if str(r.get(left_key, "")).strip() == req.package_id),
         None,
     )
     if selected_pkg is None:
         _emit(cb, LEVEL_ERROR,
-              f"Không tìm thấy package_id='{req.package_id}' "
-              f"trong sheet '{sheet}' (cột '{key_id}')")
-        return None
+              f"Không tìm thấy package_id='{req.package_id}' trong sheet '{sheet}'")
+        return None, None, key_id, left_key
 
-    # Query Config rows — FIX #3: dùng ds.query_rows(sheet, start, end) đúng signature
-    config_rows: list[dict] = []
+    # Config rows — hỗ trợ config_row_range
+    svc = KisorService(cfg, ds)
     if req.config_row_range:
-        import re as _re
         m = _re.match(r"^(\d+)-(\d+)$", req.config_row_range.strip())
         if m:
             config_rows = ds.query_rows("Config", int(m.group(1)), int(m.group(2)))
-    if not config_rows:
-        try:
-            config_rows = ds.query("SELECT * FROM Config")
-        except Exception:
-            config_rows = []
+        else:
+            config_rows = svc.get_config_for_option(req.option)
+    else:
+        config_rows = svc.get_config_for_option(req.option)
 
-    # Build context phẳng — y hệt app.py dòng 1030–1051
-    ctx: dict = {}
-    for r in config_rows:
-        key = str(r.get("Key", "") or "").strip()
-        col = str(r.get("Value", "") or "").strip()
-        if not key or not col:
-            continue
-        clean_key = clean_config_key(key)
-        raw_value = selected_pkg.get(col, "")
-        try:
-            is_na = _pd.isna(raw_value)
-        except (TypeError, ValueError):
-            is_na = False
-        if is_na:
-            raw_value = ""
-        elif isinstance(raw_value, _dt):
-            raw_value = raw_value.strftime("%d/%m/%Y")
-        elif raw_value is None:
-            raw_value = ""
-        ctx[clean_key] = str(raw_value)
-
-    return ctx
+    flat_ctx = build_context(selected_pkg, config_rows)
+    return flat_ctx, selected_pkg, key_id, left_key
 
 
 # ──────────────────────────────────────────────
-# 4. Single-file processing
-# ──────────────────────────────────────────────
-
-def _process_one(
-    template_path:  Path,
-    template_name:  str,
-    output_path:    Path,
-    context:        dict,
-    cfg,
-    goi_thau_id:    str,
-    tables_data:    list,
-    danh_muc_file:  Optional[Path],
-    key_id:         str,
-    dry_run:        bool,
-    cb:             ProgressCallback,
-) -> FileResult:
-    """
-    Copy template → mail_merge → copy_tables → rename.
-    FIX #5: copy_tables_for_file(doc_path, config, goi_thau_id,
-                                  tables_data, xlsx_path, key_id)
-    """
-    from .merger       import mail_merge_safe       # type: ignore  # FIX #1
-    from .table_copier import copy_tables_for_file  # type: ignore
-    from .file_utils   import rename_output         # type: ignore
-
-    result = FileResult(template_name=template_name)
-
-    try:
-        if dry_run:
-            _emit(cb, LEVEL_INFO, f"[DRY-RUN] {template_name}")
-            result.success        = True
-            result.dry_run_context = context
-            return result
-
-        # 1. Copy template → output
-        shutil.copy2(str(template_path), str(output_path))
-        _emit(cb, LEVEL_INFO, f"[1/3] Copy: {template_name}")
-
-        # 2. Mail merge
-        from datetime import datetime as _dt
-        from .app_helpers import make_nested_dict  # type: ignore
-
-        nested_ctx = make_nested_dict(context)
-        nested_ctx["now"] = _dt.now()
-
-        ok, err = mail_merge_safe(output_path, nested_ctx, output_path)
-        if not ok:
-            raise RuntimeError(f"mail_merge_safe: {err}")
-        _emit(cb, LEVEL_INFO, f"[2/3] Merge: {template_name}")
-
-        # 3. Copy bảng — QUAN TRỌNG: sau mail_merge (DebugUndefined)
-        # FIX #5: signature đúng
-        if danh_muc_file and danh_muc_file.exists():
-            try:
-                copy_tables_for_file(
-                    output_path,    # doc_path: Path
-                    cfg,            # config: AppConfig
-                    goi_thau_id,    # goi_thau_id: str
-                    tables_data,    # tables_data: list[dict]
-                    danh_muc_file,  # xlsx_path: Path
-                    key_id,         # key_id: str
-                )
-                _emit(cb, LEVEL_INFO, f"[3/3] Bảng: {template_name}")
-            except PermissionError:
-                raise
-            except Exception as te:
-                _emit(cb, LEVEL_WARNING, f"⚠️ Lỗi copy bảng (bỏ qua): {te}")
-
-        # 4. Rename
-        used_names: set[str] = set()
-        new_path = rename_output(output_path, goi_thau_id, used_names)
-
-        result.success     = True
-        result.output_path = str(new_path)
-        _emit(cb, LEVEL_SUCCESS,
-              f"✓ {template_name} → {new_path.name}",
-              template_name=template_name,
-              output_name=new_path.name)
-
-    except PermissionError as exc:
-        result.error   = "File đang mở trong Word — đóng lại và chạy lại"
-        result.success = False
-        _emit(cb, LEVEL_ERROR,
-              f"🔒 {template_name}: {result.error}",
-              template_name=template_name,
-              is_locked=True)
-
-    except Exception as exc:
-        result.error   = f"{type(exc).__name__}: {exc}"
-        result.success = False
-        _emit(cb, LEVEL_ERROR,
-              f"✗ {template_name}: {result.error}",
-              template_name=template_name,
-              is_locked=False,
-              traceback=traceback.format_exc())
-
-    return result
-
-
-# ──────────────────────────────────────────────
-# 5. Public entry point
+# 4. Public entry point
 # ──────────────────────────────────────────────
 
 def generate_documents(
     request:     GenerateRequest,
     on_progress: ProgressCallback = None,
 ) -> GenerateResult:
+    from datetime import datetime as _dt
+    from .app_helpers import make_nested_dict
+    from .config import load_config
+    from .dataset import DataSet
+    from .file_utils import copy_templates_to_output
+    from .generator import FileResult, generate_many
+
     t_start = time.monotonic()
     cb      = on_progress
 
@@ -335,37 +202,41 @@ def generate_documents(
         _emit(cb, LEVEL_ERROR, f"Lỗi config: {exc}")
         return GenerateResult(success=False, error=str(exc))
 
-    # FIX #6: DataSet(cfg) — không truyền excel_files
     try:
-        from .dataset import DataSet  # type: ignore
         ds = DataSet(cfg)
     except Exception as exc:
         _emit(cb, LEVEL_ERROR, f"Lỗi DataSet: {exc}")
         return GenerateResult(success=False, error=str(exc))
 
-    # FIX #3: _build_context mới
-    context = _build_context(ds, request, cfg, cb)
-    if context is None:
+    # Build context qua generator.build_context (cùng logic với batch)
+    flat_ctx, selected_pkg, key_id, left_key = _build_context_for_request(ds, request, cfg, cb)
+    if flat_ctx is None:
         return GenerateResult(
             success=False,
             error=f"Không có dữ liệu cho '{request.package_id}'"
         )
-    _emit(cb, LEVEL_INFO, f"Context: {len(context)} keys")
+    _emit(cb, LEVEL_INFO, f"Context: {len(flat_ctx)} keys")
 
-    # Metadata cho copy_tables
-    opt_config = KisorService(cfg, ds).get_option_config(request.option)
-    key_id     = opt_config.get("key_id", "ID")
+    nested_ctx = make_nested_dict(flat_ctx)
+    nested_ctx["now"] = _dt.now()
+
+    # Tables + danh_muc_file
     try:
-        tables_data = ds.query("SELECT * FROM Tables")
+        tables_rows = ds.query("SELECT * FROM Tables")
     except Exception:
-        tables_data = []
+        tables_rows = []
 
     xlsx_files    = sorted(data_dir.glob("*.xlsx"))
     danh_muc_file = next(
-        (f for f in xlsx_files
-         if "DanhMuc" in f.stem or "danh muc" in f.stem.lower()),
+        (f for f in xlsx_files if cfg.DanhMucFile.lower() in f.stem.lower()),
         xlsx_files[0] if xlsx_files else None,
     )
+
+    table_placeholder_names = {
+        str(t.get("Name", "")).strip("{} ")
+        for t in tables_rows
+        if str(t.get(left_key, "")).strip() == request.package_id
+    }
 
     # Chuẩn bị output dir
     if not request.dry_run:
@@ -375,44 +246,60 @@ def generate_documents(
             _emit(cb, LEVEL_ERROR, f"Lỗi output dir: {exc}")
             return GenerateResult(success=False, error=str(exc))
 
-    # Loop templates
+    # Resolve template files
     total   = len(request.templates)
-    results: List[FileResult] = []
     skipped = 0
+    template_paths: list[tuple[Path, str]] = []
+    skipped_results: list[FileResult]      = []
 
-    for idx, tpl_name in enumerate(request.templates, start=1):
-        _emit(cb, LEVEL_INFO,
-              f"[{idx}/{total}] {tpl_name}", current=idx, total=total)
-
+    for tpl_name in request.templates:
         tpl_path = _find_template_file(templates_dir, request.option, tpl_name)
         if tpl_path is None:
             _emit(cb, LEVEL_WARNING, f"Bỏ qua '{tpl_name}': không tìm thấy template")
-            results.append(FileResult(
+            skipped_results.append(FileResult(
                 template_name=tpl_name, success=False,
                 error="Template file không tồn tại"))
             skipped += 1
             continue
+        # Copy vào output_dir trước khi generate_many (giống batch)
+        out_copy = output_dir / tpl_path.name
+        if not request.dry_run:
+            import shutil
+            try:
+                shutil.copy2(str(tpl_path), str(out_copy))
+            except Exception as exc:
+                _emit(cb, LEVEL_ERROR, f"Lỗi copy template '{tpl_name}': {exc}")
+                skipped_results.append(FileResult(
+                    template_name=tpl_name, success=False, error=str(exc)))
+                skipped += 1
+                continue
+        template_paths.append((out_copy if not request.dry_run else tpl_path, tpl_name))
 
-        out_path = output_dir / tpl_path.name
+    # on_progress adapter: engine log chuẩn
+    def _engine_progress(event: dict):
+        _emit(cb, event.get("level", "info"), event.get("message", ""),
+              **{k: v for k, v in event.items() if k not in ("level", "message")})
 
-        results.append(_process_one(
-            template_path = tpl_path,
-            template_name = tpl_name,
-            output_path   = out_path,
-            context       = context,
-            cfg           = cfg,
-            goi_thau_id   = request.package_id,
-            tables_data   = tables_data,
-            danh_muc_file = danh_muc_file,
-            key_id        = key_id,
-            dry_run       = request.dry_run,
-            cb            = cb,
-        ))
+    # Gọi core generate_many — cùng pipeline với batch
+    file_results = generate_many(
+        template_paths          = template_paths,
+        nested_context          = nested_ctx,
+        cfg                     = cfg,
+        goi_thau_id             = request.package_id,
+        tables_rows             = tables_rows,
+        danh_muc_file           = danh_muc_file,
+        key_id                  = left_key,
+        table_placeholder_names = table_placeholder_names,
+        dry_run                 = request.dry_run,
+        max_retries             = 3,
+        retry_delay             = 2.0,
+        on_progress             = _engine_progress,
+    )
 
-    succeeded = sum(1 for r in results if r.success)
-    failed    = sum(1 for r in results
-                    if not r.success and r.error != "Template file không tồn tại")
-    duration  = time.monotonic() - t_start
+    all_results = skipped_results + file_results
+    succeeded   = sum(1 for r in all_results if r.success)
+    failed      = sum(1 for r in all_results if not r.success and r.error != "Template file không tồn tại")
+    duration    = time.monotonic() - t_start
 
     _emit(cb, LEVEL_SUCCESS if failed == 0 else LEVEL_WARNING,
           f"═══ Xong: {succeeded}/{total} OK, {failed} lỗi, {skipped} bỏ qua "
@@ -420,7 +307,7 @@ def generate_documents(
 
     return GenerateResult(
         success          = (failed == 0),
-        files            = results,
+        files            = all_results,
         total            = total,
         succeeded        = succeeded,
         failed           = failed,
@@ -430,28 +317,28 @@ def generate_documents(
 
 
 # ──────────────────────────────────────────────
-# 6. Utilities
+# 5. Utilities
 # ──────────────────────────────────────────────
 
 def list_templates(option: Optional[str] = None) -> List[str]:
-    from .config import load_config  # type: ignore
-    cfg       = load_config()
-    search    = (cfg.template_path / option) if option else cfg.template_path
+    from .config import load_config
+    cfg    = load_config()
+    search = (cfg.template_path / option) if option else cfg.template_path
     if not search.exists():
         return []
     return sorted(p.stem for p in search.rglob("*.docx"))
 
 
 def list_packages(option_key: str = "") -> List[str]:
-    """FIX #4: bỏ ds.list_package_ids() — dùng ds.query() trực tiếp."""
-    from .config  import load_config  # type: ignore
-    from .dataset import DataSet      # type: ignore
+    from .config import load_config
+    from .dataset import DataSet
+    from .service import KisorService
     try:
         cfg        = load_config()
         ds         = DataSet(cfg)
         opt_config = KisorService(cfg, ds).get_option_config(option_key) if option_key else {}
         key_id     = opt_config.get("key_id", "ID")
-        sheet      = opt_config.get("sheet",  "GoiThau")
+        sheet      = opt_config.get("sheet", "GoiThau")
         rows       = ds.query(f'SELECT DISTINCT "{key_id}" FROM "{sheet}"')
         return sorted(str(r.get(key_id, "")).strip() for r in rows if r.get(key_id))
     except Exception:

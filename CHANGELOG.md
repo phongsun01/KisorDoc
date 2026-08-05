@@ -1,5 +1,18 @@
 # Changelog
 
+## [4.1.0] - 2026-08-05
+
+### Added
+- **Module Core Sync `kisorlib/generator.py`:** Tích hợp logic sinh tài liệu đồng bộ làm Single Source of Truth cho cả UI (`batch.py`) và API (`engine.py`). Giải quyết triệt để lỗi dual-pipeline.
+- **Tách module `kisorlib/sql_join.py`:** Di chuyển toàn bộ các hàm tiện ích và xử lý SQL Join biểu thức (`parse_join_expression`, `resolve_sheet_query`, `validate_sql_identifier`,...) từ `utils.py` sang module mới.
+- **Unit Tests Hồi Quy:** Bổ sung file test mới [tests/test_generator.py](tests/test_generator.py) với 25 test cases kiểm chứng chi tiết hoạt động của core `generator` (sinh 1 file, nhiều file, repeat mode, lock/retry).
+
+### Changed
+- **Tái cấu trúc `kisorlib/batch.py`:** Loại bỏ hoàn toàn logic sinh file, merge docx, chỉ giữ lại vai trò async/yield progress wrapper và ghi log Gradio qua `IncrementalRunLogger`.
+- **Tái cấu trúc `kisorlib/engine.py`:** Chuyển đổi gọi trực tiếp xuống core `generator.py` thay vì xử lý merge nội bộ.
+- **Cập nhật `kisorlib/utils.py`:** Loại bỏ các hàm SQL trùng lặp, chỉ giữ lại định dạng chuỗi và AST cơ bản, đồng thời re-export từ `sql_join.py` để tương thích ngược.
+- **Cập nhật Tài liệu Lỗi:** Đánh dấu dual-pipeline đã được xử lý hoàn toàn trong [known-issues.md](file:///D:/Antigravity/KisorDoc/docs/known-issues.md).
+
 ## [4.0.3] - 2026-08-05
 
 ### Added

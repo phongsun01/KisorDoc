@@ -62,8 +62,10 @@ Các vấn đề kiến trúc và lỗi trong danh sách trên đã được gi�
 3. **Bổ sung Unit Tests tự động**:
    - Viết thêm bộ test chuyên biệt [tests/test_service.py](file:///D:/Antigravity/KisorDoc/tests/test_service.py) chạy trên bộ dữ liệu giả lập in-memory để kiểm thử `KisorService`, Repeat mode, đăng ký thành viên tạm thời và preview composite key.
 
-### Bảo mật SQL (SQL Identifier Injection - Đã giải quyết)
+### Bảo mật SQL (SQL Identifier Injection - Đã giải quyết ở v4.0.3)
 - **Vấn đề**: Trước đây, mặc dù giá trị dữ liệu đã được tham số hóa an toàn bằng `?`, tên cột (`join_key`, `key_id`) và tên bảng (`right_sheet`) vẫn được nối chuỗi trực tiếp từ cấu hình Excel.
 - **Giải pháp**: Đã bổ sung hàm `validate_sql_identifier` sử dụng regex whitelist `^[A-Za-z0-9_\s\-\.\#\u00C0-\u1EF9]+$` để kiểm tra định dạng an toàn trước khi thực hiện câu lệnh SQL, triệt tiêu hoàn toàn nguy cơ chèn mã SQL qua Excel.
 
-
+### Giải quyết Dual-Pipeline (Đã giải quyết ở v4.1.0)
+- **Vấn đề**: Hai nhánh chạy song song (UI dùng `batch.py` và API dùng `engine.py`) có logic sinh tài liệu trùng lặp, dễ dẫn đến lệch tính năng và lỗi hồi quy.
+- **Giải pháp**: Tách toàn bộ core sinh file đồng bộ (sync core) sang `kisorlib/generator.py` làm Single Source of Truth. UI (`batch.py`) và API (`engine.py`) đóng vai trò các adapter mỏng gọi xuống core. Toàn bộ 7 tính năng (retry, repeat, log, placeholders,...) nay đã được chia sẻ chung. Đồng thời tách các hàm SQL sang `kisorlib/sql_join.py`.

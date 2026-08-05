@@ -1,0 +1,2557 @@
+diff --git a/kisorlib/batch.py b/kisorlib/batch.py
+index 1f75841..7738330 100644
+--- a/kisorlib/batch.py
++++ b/kisorlib/batch.py
+@@ -1,18 +1,19 @@
+-import time
+-import shutil
++"""
++kisorlib/batch.py — Refactor v3.2
++──────────────────────────────────
++Async wrapper + Progress + IncrementalRunLogger cho Gradio UI.
++
++KHÔNG còn logic merge/copy/retry nội bộ:
++tất cả đi qua generator.generate_many / generator.generate_one_repeat.
++"""
++
+ import re
+-import errno
+-import pandas as pd
+-import jinja2
++import time
+ from pathlib import Path
+ from datetime import datetime
+ from typing import Callable, Optional
+-from docxtpl import DocxTemplate
+ 
+-from .merger import mail_merge_safe
+-from .table_copier import copy_tables_for_file
+-from .file_utils import clear_output_folder, copy_templates_to_output, rename_output
+-from .app_helpers import make_nested_dict
++from .file_utils import clear_output_folder, copy_templates_to_output
+ from .utils import (
+     _str,
+     clean_config_key,
+@@ -21,72 +22,51 @@ from .utils import (
+     _parse_repeat_sheet_config,
+     _parse_repeat_key_id,
+ )
++from .app_helpers import make_nested_dict
+ from .service import KisorService
+-from .filters import (
+-    filter_date, filter_date_long, filter_number, filter_num2text,
+-    filter_day, filter_month, filter_year, filter_add_days,
+-    filter_add_months, filter_date_diff, filter_quarter,
+-    filter_weekday, filter_date_text
++from .generator import (
++    build_context,
++    generate_many,
++    generate_one_repeat,
++    FileResult,
+ )
+ 
+ 
+-def write_with_retry(func, max_retries=3, delay=2.0, yield_fn=None) -> tuple[bool, str]:
+-    """
+-    Thực thi func() có retry khi gặp PermissionError (file đang bị khóa).
+-    Luôn trả về (bool, str) để caller dùng pattern: ok, err = write_with_retry(...)
+-    """
+-    for attempt in range(1, max_retries + 1):
+-        try:
+-            result = func()
+-            if isinstance(result, tuple) and len(result) == 2:
+-                return bool(result[0]), str(result[1])
+-            return True, ""
+-        except PermissionError as e:
+-            if "being used by another process" in str(e) or e.errno == errno.EACCES:
+-                if attempt == max_retries:
+-                    raise
+-                msg = f"🔒 File bị khóa – thử lại lần {attempt}/{max_retries} sau {delay:.0f}s..."
+-                if yield_fn:
+-                    yield_fn(msg)
+-                time.sleep(delay)
+-            else:
+-                raise
+-
++# ──────────────────────────────────────────────
++# IncrementalRunLogger (giữ nguyên)
++# ──────────────────────────────────────────────
+ 
+ class IncrementalRunLogger:
+     def __init__(self, config, goi_thau_id, option, mode="run"):
+-        self.config = config
+-        self.goi_thau_id = goi_thau_id
+-        self.option = option
+-        self.mode = mode
+-        
+-        self.log_dir = Path(config.ProjectPath) / "logs"
++        self.config         = config
++        self.goi_thau_id    = goi_thau_id
++        self.option         = option
++        self.mode           = mode
++        self.log_dir        = Path(config.ProjectPath) / "logs"
+         self.log_dir.mkdir(exist_ok=True)
+-        
+-        ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+-        suffix = f"_{mode}" if mode != "run" else ""
+-        self.filepath = self.log_dir / f"{ts}_{goi_thau_id}_{option}{suffix}.log"
+-        self.start_time = time.time()
+-        self.ok_count = 0
+-        self.error_count = 0
+-        self.warning_count = 0
+-        self._fh = open(self.filepath, "w", encoding="utf-8-sig")
++        ts                  = datetime.now().strftime("%Y-%m-%d_%H%M%S")
++        suffix              = f"_{mode}" if mode != "run" else ""
++        self.filepath       = self.log_dir / f"{ts}_{goi_thau_id}_{option}{suffix}.log"
++        self.start_time     = time.time()
++        self.ok_count       = 0
++        self.error_count    = 0
++        self.warning_count  = 0
++        self._fh            = open(self.filepath, "w", encoding="utf-8-sig")
+ 
+     def write_header(self, option_desc, package_desc, total_files):
+         time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+         mode_str = "Chạy thật" if self.mode == "run" else ("Retry" if self.mode == "retry" else "Dry-run")
+-        header = f"""=====================================
+-KisorDoc – Run Log
+-=====================================
+-Thời gian     : {time_str}
+-Option        : {option_desc}
+-Gói thầu      : {package_desc}
+-Chế độ        : {mode_str}
+-Tổng file     : {total_files}
+-=====================================
+-
+-"""
+-        self._fh.write(header)
++        self._fh.write(
++            f"=====================================\n"
++            f"KisorDoc – Run Log\n"
++            f"=====================================\n"
++            f"Thời gian     : {time_str}\n"
++            f"Option        : {option_desc}\n"
++            f"Gói thầu      : {package_desc}\n"
++            f"Chế độ        : {mode_str}\n"
++            f"Tổng file     : {total_files}\n"
++            f"=====================================\n\n"
++        )
+         self._fh.flush()
+ 
+     def log_event(self, emoji, name, extra_info=None):
+@@ -99,15 +79,42 @@ Tổng file     : {total_files}
+ 
+     def write_footer(self):
+         elapsed = time.time() - self.start_time
+-        footer = f"""
+-=====================================
+-Kết quả: {self.ok_count} thành công / {self.error_count} lỗi / {self.warning_count} warning
+-Thời gian chạy: {elapsed:.1f} giây
+-=====================================
+-"""
+-        self._fh.write(footer)
++        self._fh.write(
++            f"\n=====================================\n"
++            f"Kết quả: {self.ok_count} thành công / "
++            f"{self.error_count} lỗi / {self.warning_count} warning\n"
++            f"Thời gian chạy: {elapsed:.1f} giây\n"
++            f"=====================================\n"
++        )
+         self._fh.close()
+ 
++    # ── record helpers ──
++
++    def record_result(self, results: list, file_result: FileResult, display_name: str):
++        """Ghi kết quả từ FileResult vào logger + results list."""
++        name = file_result.template_name
++        if file_result.success:
++            if file_result.warnings:
++                warn_msg = "; ".join(file_result.warnings)
++                results.append(f"⚠️ {name} → {display_name}\n   → {warn_msg}")
++                self.warning_count += 1
++                self.log_event("⚠️", f"{name} → {display_name}", warn_msg)
++            else:
++                results.append(f"✅ {name} → {display_name}")
++                self.ok_count += 1
++                self.log_event("✅", f"{name} → {display_name}")
++        else:
++            err_msg = file_result.error or "Lỗi không xác định"
++            is_locked = "đang mở" in err_msg or "bị khóa" in err_msg or "PermissionError" in err_msg
++            if is_locked:
++                results.append(f"🔒 {name}: {err_msg}")
++                self.log_event("🔒", name, f"Lỗi: PermissionError – {err_msg}")
++            else:
++                results.append(f"❌ {name}: {err_msg}")
++                self.log_event("❌", name, f"Lỗi: {err_msg}")
++            self.error_count += 1
++
++    # Backward-compat (dùng bởi code cũ còn sót)
+     def record_ok(self, results, name, display_name):
+         results.append(f"✅ {name} → {display_name}")
+         self.ok_count += 1
+@@ -135,416 +142,423 @@ Thời gian chạy: {elapsed:.1f} giây
+         self.log_event("❌", name, f"Lỗi: {msg}")
+ 
+ 
+-async def run_batch(service: KisorService, option_key: str, package_label: str, selected_templates: list[str],
+-                    group_name: str = "", progress_cb: Optional[Callable[[float, str], None]] = None,
+-                    retry_state: dict | None = None):
++# ──────────────────────────────────────────────
++# Helpers nội bộ
++# ──────────────────────────────────────────────
+ 
+-    config = service.config
+-    ds = service.ds
++def _is_locked_error(err_msg: str) -> bool:
++    return (
++        "đang mở" in err_msg
++        or "bị khóa" in err_msg
++        or "PermissionError" in err_msg
++        or "being used by another process" in err_msg
++    )
+ 
+-    if not option_key or not option_key.strip():
+-        yield "", "⚠️ Vui lòng chọn quy trình", None
+-        return
+-    if not package_label or not package_label.strip():
+-        yield "", "⚠️ Vui lòng chọn gói thầu", None
+-        return
+-    if not selected_templates or len(selected_templates) == 0:
+-        yield "", "⚠️ Vui lòng chọn ít nhất 1 template hoặc thành viên", None
+-        return
+ 
+-    opt = option_key.split(":")[0].strip() if ":" in option_key else option_key.strip()
++def _find_danh_muc_file(config) -> Optional[Path]:
++    xlsx_files = sorted(config.data_path.glob("*.xlsx"))
++    return next(
++        (f for f in xlsx_files if config.DanhMucFile.lower() in f.stem.lower()),
++        xlsx_files[0] if xlsx_files else None,
++    )
+ 
+-    opt_config = service.get_option_config(option_key)
+-    sheet = opt_config.get("sheet", config.DataSheet)
+-    key_id = opt_config.get("key_id", "ID")
+-    show_format = opt_config.get("show", "")
+-    show_format_full = show_format
+-    if "|" in show_format:
+-        show_format = show_format.split("|")[0].strip()
+ 
+-    # Query initial package to get goi_thau_id
+-    if opt_config.get("type") == "Repeat":
+-        ls, _, _ = _parse_repeat_sheet_config(opt_config)
+-        temp_sql = f'SELECT * FROM "{ls}"' if ls else resolve_sheet_query(sheet)
+-    else:
+-        temp_sql = resolve_sheet_query(sheet)
+-    temp_rows = ds.query(temp_sql)
+-    selected_pkg_initial = None
+-    for r in temp_rows:
+-        if safe_format(show_format, r) == package_label:
+-            selected_pkg_initial = r
+-            break
+-    if not selected_pkg_initial:
+-        yield "", "❌ Không tìm thấy dòng dữ liệu tương ứng", None
++def _make_progress_cb(progress_cb, i, total, label):
++    """Tạo on_progress adapter cho generator."""
++    def _on_prog(event: dict):
++        if progress_cb and event.get("level") in ("info", "warning", "error", "success"):
++            progress_cb((i + 1) / total, event.get("message", label))
++    return _on_prog
++
++
++# ──────────────────────────────────────────────
++# run_batch (Repeat branch)
++# ──────────────────────────────────────────────
++
++async def _run_batch_repeat(
++    service: KisorService,
++    option_key: str,
++    package_label: str,
++    selected_templates: list[str],
++    group_name: str,
++    goi_thau_id: str,
++    left_key: str,
++    right_key: str,
++    progress_cb,
++    retry_state: dict | None,
++):
++    config = service.config
++    ds     = service.ds
++    opt    = option_key.split(":")[0].strip() if ":" in option_key else option_key.strip()
++
++    opt_config = service.get_option_config(option_key)
++    key_id     = opt_config.get("key_id", "ID")
++    show_format_full = opt_config.get("show", "")
++
++    # Tìm template file
++    templates = service.get_workflow_templates(option_key, package_label)
++    matched_tpl = next((t for t in templates if _str(t.get("Name")) == group_name), None)
++    if not matched_tpl:
++        yield "", f"❌ Không tìm thấy template cho '{group_name}'", None
+         return
+-    left_key, right_key = _parse_repeat_key_id(key_id)
+-    goi_thau_id = _str(selected_pkg_initial.get(left_key))
+ 
+-    sql = resolve_sheet_query(sheet)
++    fname_raw = _str(matched_tpl.get("File", ""))
++    fname     = fname_raw if fname_raw.endswith(".docx") else fname_raw + ".docx"
+ 
+-    if opt_config.get("type") == "Repeat":
+-        templates = service.get_workflow_templates(option_key, package_label, sheet_rows=temp_rows)
+-        matched_tpl = next((t for t in templates if _str(t.get("Name")) == group_name), None)
+-        if not matched_tpl:
+-            yield "", f"❌ Không tìm thấy template cho '{group_name}'", None
+-            return
++    if not retry_state:
++        clear_output_folder(config)
+ 
+-        fname_raw = _str(matched_tpl.get("File", ""))
+-        fname = fname_raw if fname_raw.endswith(".docx") else fname_raw + ".docx"
++    try:
++        tables_rows = ds.query("SELECT * FROM Tables")
++    except Exception:
++        tables_rows = []
++
++    config_rows   = service.get_config_for_option(option_key)
++    danh_muc_file = _find_danh_muc_file(config)
+ 
+-        if not retry_state:
+-            clear_output_folder(config)
++    results          = []
++    failed_templates = []
++    has_locked       = [False]
++    has_other_error  = [False]
++    logger           = IncrementalRunLogger(config, goi_thau_id, opt, "retry" if retry_state else "run")
++    logger.write_header(option_key, package_label, len(selected_templates))
++
++    src_dir = config.template_path / opt
++    src = src_dir / fname
++    if not src.exists():
++        possible = list(src_dir.glob(f"{fname}*"))
++        if possible:
++            src = possible[0]
++
++    for i, member_name in enumerate(selected_templates):
++        if progress_cb:
++            progress_cb((i + 1) / len(selected_templates), f"Đang xử lý thành viên: {member_name}")
+ 
+         try:
+-            tables_rows = ds.query("SELECT * FROM Tables")
+-        except Exception:
+-            tables_rows = []
++            ok = service.register_temporary_tcgttd(goi_thau_id, [member_name], group_name, key_id, option_key)
++            if not ok:
++                msg = f"⚠️ Bỏ qua thành viên '{member_name}': không tìm thấy trong bảng dữ liệu"
++                results.append(msg)
++                continue
++
++            sql = resolve_sheet_query(opt_config.get("sheet", config.DataSheet))
++            joined_rows = ds.query(sql)
++            if not joined_rows:
++                raise RuntimeError(f"Không thể kết nối thông tin cho thành viên {member_name}")
++            member_pkg_row = joined_rows[0]
++
++            # member col
++            member_col = right_key
++            if "|" in show_format_full:
++                right_format = show_format_full.split("|", 1)[1]
++                matches = re.findall(r"\{([^}]+)\}", right_format)
++                if matches:
++                    member_col = matches[0].strip()
++            member_val     = _str(member_pkg_row.get(member_col, member_name))
++            clean_member_k = clean_config_key(member_col)
++
++            extra = {
++                right_key:      _str(member_pkg_row.get(right_key, "")),
++                clean_member_k: member_val,
++                "HoTen":        member_val,
++                "Ho_va_ten":    member_val,
++            }
++            ctx = build_context(member_pkg_row, config_rows, extra=extra)
++            nested_ctx = make_nested_dict(ctx)
++            nested_ctx["now"] = datetime.now()
++
++            on_progress_cb = _make_progress_cb(progress_cb, i, len(selected_templates), member_name)
++
++            file_result = generate_one_repeat(
++                template_path  = src,
++                template_name  = fname,
++                member_name    = member_name,
++                nested_context = nested_ctx,
++                cfg            = config,
++                goi_thau_id    = goi_thau_id,
++                tables_rows    = tables_rows,
++                danh_muc_file  = danh_muc_file,
++                key_id         = left_key,
++                max_retries    = 3,
++                retry_delay    = 2.0,
++                on_progress    = on_progress_cb,
++            )
++
++            display_name = Path(file_result.output_path).name if file_result.output_path else member_name
++            logger.record_result(results, file_result, display_name)
++            if not file_result.success:
++                err_msg = file_result.error or ""
++                if _is_locked_error(err_msg):
++                    has_locked[0] = True
++                else:
++                    has_other_error[0] = True
++                failed_templates.append(member_name)
+ 
+-        config_rows = service.get_config_for_option(option_key)
++        except Exception as e:
++            has_other_error[0] = True
++            failed_templates.append(member_name)
++            results.append(f"❌ {member_name}: {e}")
++            logger.log_event("❌", member_name, str(e))
++            logger.error_count += 1
+ 
+-        xlsx_files = sorted(config.data_path.glob("*.xlsx"))
+-        danh_muc_file = next(
+-            (f for f in xlsx_files if config.DanhMucFile.lower() in f.stem.lower()),
+-            xlsx_files[0] if xlsx_files else None
+-        )
++        yield "\n".join(results), f"Đang xử lý {i + 1}/{len(selected_templates)}...", None
+ 
+-        results = []
+-        failed_templates = []
+-        has_locked = [False]
+-        has_other_error = [False]
+-        
+-        logger = IncrementalRunLogger(config, goi_thau_id, opt, "retry" if retry_state else "run")
+-        logger.write_header(option_key, package_label, len(selected_templates))
+-
+-        for i, member_name in enumerate(selected_templates):
+-            if progress_cb:
+-                progress_cb((i + 1) / len(selected_templates), f"Đang xử lý thành viên: {member_name}")
+-
+-            try:
+-                ok = service.register_temporary_tcgttd(goi_thau_id, [member_name], group_name, key_id, option_key)
+-                if not ok:
+-                    msg = f"⚠️ Bỏ qua thành viên '{member_name}': không tìm thấy trong bảng dữ liệu"
+-                    logger.write_item(member_name, fname, "SKIP", msg)
+-                    results.append((member_name, "SKIP"))
+-                    continue
+-
+-                joined_rows = ds.query(sql)
+-                if not joined_rows:
+-                    raise RuntimeError(f"Không thể kết nối thông tin cho thành viên {member_name}")
+-                member_pkg_row = joined_rows[0]
+-
+-                context = {}
+-                for r in config_rows:
+-                    key = _str(r.get("Key"))
+-                    col = _str(r.get("Value"))
+-                    if not key or not col:
+-                        continue
+-                    clean_key = clean_config_key(key)
+-                    raw_value = member_pkg_row.get(col, "")
+-                    try:
+-                        is_na = pd.isna(raw_value)
+-                    except (TypeError, ValueError):
+-                        is_na = False
+-                    if is_na:
+-                        raw_value = ""
+-                    elif isinstance(raw_value, datetime):
+-                        raw_value = raw_value.strftime("%d/%m/%Y")
+-                    elif raw_value is None:
+-                        raw_value = ""
+-                    context[clean_key] = str(raw_value)
+-
+-                context[right_key] = _str(member_pkg_row.get(right_key, ""))
+-
+-                member_col = right_key
+-                if "|" in show_format_full:
+-                    right_format = show_format_full.split("|", 1)[1]
+-                    matches = re.findall(r"\{([^}]+)\}", right_format)
+-                    if matches:
+-                        member_col = matches[0].strip()
+-                member_val = _str(member_pkg_row.get(member_col, member_name))
+-                clean_member_key = clean_config_key(member_col)
+-                context[clean_member_key] = member_val
+-                context["HoTen"] = member_val
+-                context["Ho_va_ten"] = member_val
+-
+-                nested_context = make_nested_dict(context)
+-                nested_context["now"] = datetime.now()
+-
+-                src_dir = config.template_path / opt
+-                src = src_dir / fname
+-                if not src.exists():
+-                    possible = list(src_dir.glob(f"{fname}*"))
+-                    if possible:
+-                        src = possible[0]
+-                dst = config.output_path / src.name
++    elapsed = time.time() - logger.start_time
++    summary = f"✅ {logger.ok_count}  ❌ {logger.error_count}  /  {len(selected_templates)} người  ({elapsed:.1f}s)"
++    logger.write_footer()
+ 
+-                def do_copy(s=src, d=dst):
+-                    shutil.copy2(s, d)
+-                write_with_retry(do_copy, max_retries=3, delay=2.0)
+-
+-                def do_merge():
+-                    return mail_merge_safe(dst, nested_context, dst)
+-                ok, err = write_with_retry(do_merge, max_retries=3, delay=2.0)
+-                if not ok:
+-                    raise RuntimeError(err)
+-
+-                if danh_muc_file and danh_muc_file.exists():
+-                    try:
+-                        copy_tables_for_file(dst, config, goi_thau_id, tables_rows, danh_muc_file, left_key)
+-                    except Exception as table_err:
+-                        print(f"⚠️ Lỗi copy bảng: {table_err}")
+-
+-                new_filename = f"{src.stem.replace('-Template', '')}-{goi_thau_id}-{member_name}.docx"
+-                new_path = config.output_path / new_filename
+-                if dst.exists():
+-                    dst.rename(new_path)
+-
+-                logger.record_ok(results, member_name, new_filename)
+-
+-            except PermissionError as e:
+-                logger.record_locked(results, member_name, has_locked, failed_templates)
+-            except Exception as e:
+-                logger.record_error(results, member_name, e, has_other_error, failed_templates)
+-
+-            yield "\n".join(results), f"Đang xử lý {i + 1}/{len(selected_templates)}...", None
+-
+-        elapsed = time.time() - logger.start_time
+-        summary = f"✅ {logger.ok_count}  ❌ {logger.error_count}  /  {len(selected_templates)} người  ({elapsed:.1f}s)"
+-        logger.write_footer()
+-
+-        retry_state_data = None
+-        if failed_templates:
+-            retry_state_data = {
+-                "option_key": option_key,
+-                "package_label": package_label,
+-                "failed_templates": failed_templates,
+-                "all_locked": has_locked[0] and not has_other_error[0],
+-                "group_name": group_name
+-            }
+-        yield "\n".join(results), summary, retry_state_data
+-        return
++    retry_state_data = None
++    if failed_templates:
++        retry_state_data = {
++            "option_key":        option_key,
++            "package_label":     package_label,
++            "failed_templates":  failed_templates,
++            "all_locked":        has_locked[0] and not has_other_error[0],
++            "group_name":        group_name,
++        }
++    yield "\n".join(results), summary, retry_state_data
+ 
+-    sql = resolve_sheet_query(sheet)
+-    goi_thau_rows = ds.query(sql)
+-    selected_pkg = None
+-    for r in goi_thau_rows:
+-        label = safe_format(show_format, r)
+-        if label == package_label:
+-            selected_pkg = r
+-            break
+ 
+-    if not selected_pkg:
+-        yield "", "❌ Không tìm thấy dòng dữ liệu tương ứng", None
+-        return
+-
+-    left_key, right_key = _parse_repeat_key_id(key_id)
+-    goi_thau_id = _str(selected_pkg.get(left_key))
+-    config_rows = service.get_config_for_option(option_key)
++# ──────────────────────────────────────────────
++# run_batch (normal branch)
++# ──────────────────────────────────────────────
++
++async def _run_batch_normal(
++    service: KisorService,
++    option_key: str,
++    package_label: str,
++    selected_templates: list[str],
++    goi_thau_id: str,
++    left_key: str,
++    selected_pkg: dict,
++    progress_cb,
++    retry_state: dict | None,
++):
++    config = service.config
++    ds     = service.ds
++    opt    = option_key.split(":")[0].strip() if ":" in option_key else option_key.strip()
++    opt_config = service.get_option_config(option_key)
++    key_id     = opt_config.get("key_id", "ID")
+ 
+     try:
+         tables_rows = ds.query("SELECT * FROM Tables")
+     except Exception:
+         tables_rows = []
+ 
+-    context = {}
+-    for r in config_rows:
+-        key = _str(r.get("Key"))
+-        col = _str(r.get("Value"))
+-        if not key or not col:
+-            continue
+-        clean_key = clean_config_key(key)
+-
+-        raw_value = selected_pkg.get(col, "")
+-
+-        try:
+-            is_na = pd.isna(raw_value)
+-        except (TypeError, ValueError):
+-            is_na = False
+-        if is_na:
+-            raw_value = ""
+-        elif isinstance(raw_value, datetime):
+-            raw_value = raw_value.strftime("%d/%m/%Y")
+-        elif raw_value is None:
+-            raw_value = ""
+-
+-        context[clean_key] = str(raw_value)
++    config_rows = service.get_config_for_option(option_key)
++    ctx         = build_context(selected_pkg, config_rows)
++    nested_ctx  = make_nested_dict(ctx)
++    nested_ctx["now"] = datetime.now()
+ 
+-    nested_context = make_nested_dict(context)
+-    nested_context["now"] = datetime.now()
++    danh_muc_file = _find_danh_muc_file(config)
+ 
+-    xlsx_files = sorted(config.data_path.glob("*.xlsx"))
+-    danh_muc_file = next(
+-        (f for f in xlsx_files if config.DanhMucFile.lower() in f.stem.lower()),
+-        xlsx_files[0] if xlsx_files else None
+-    )
++    table_placeholder_names = {
++        _str(t.get("Name", "")).strip("{} ")
++        for t in tables_rows
++        if _str(t.get(key_id)) == goi_thau_id
++    }
+ 
+     if progress_cb:
+         progress_cb(0, "Bắt đầu xử lý...")
+     yield "", "Bắt đầu...", None
+ 
+-    mode = "retry" if retry_state else "run"
++    mode   = "retry" if retry_state else "run"
+     logger = IncrementalRunLogger(config, goi_thau_id, opt, mode)
+ 
++    # Chuẩn bị danh sách template file
+     if retry_state:
+         failed_names = retry_state.get("failed_templates", [])
+         template_filenames, template_names = [], []
+         for r in service.get_workflow_templates(option_key, package_label):
+             if r.get("Name", "") in failed_names:
+-                fname_raw = _str(r.get("File", ""))
+-                fname = fname_raw if fname_raw.endswith(".docx") else fname_raw + ".docx"
+-                template_filenames.append(fname)
++                fn = _str(r.get("File", ""))
++                fn = fn if fn.endswith(".docx") else fn + ".docx"
++                template_filenames.append(fn)
+                 template_names.append(r.get("Name", ""))
+-        copied = []
+-        template_names_actual = []
++        from .file_utils import copy_templates_to_output as _cto
+         src_dir = config.template_path / opt
+-        for fname, tname in zip(template_filenames, template_names):
+-            src = src_dir / fname
++        copied  = []
++        names_actual = []
++        for fn, tn in zip(template_filenames, template_names):
++            src = src_dir / fn
+             if not src.exists():
+-                possible = list(src_dir.glob(f"{fname}*"))
+-                if possible:
+-                    src = possible[0]
+-                else:
+-                    continue
+-            dst = config.output_path / src.name
+-            def do_copy(s=src, d=dst):
+-                shutil.copy2(s, d)
+-            try:
+-                write_with_retry(do_copy, max_retries=3, delay=2.0)
+-                copied.append(dst)
+-                template_names_actual.append(tname)
+-            except PermissionError:
+-                copied.append(dst)
+-                template_names_actual.append(tname)
+-        template_names = template_names_actual
++                possible = list(src_dir.glob(f"{fn}*"))
++                src = possible[0] if possible else None
++            if src:
++                import shutil as _sh
++                dst = config.output_path / src.name
++                try:
++                    _sh.copy2(str(src), str(dst))
++                    copied.append(dst)
++                    names_actual.append(tn)
++                except Exception:
++                    copied.append(dst)
++                    names_actual.append(tn)
++        template_names = names_actual
+     else:
+         clear_output_folder(config)
+         template_filenames, template_names = [], []
+         for r in service.get_workflow_templates(option_key, package_label):
+             if r.get("Name", "") in selected_templates:
+-                fname_raw = _str(r.get("File", ""))
+-                fname = fname_raw if fname_raw.endswith(".docx") else fname_raw + ".docx"
+-                template_filenames.append(fname)
++                fn = _str(r.get("File", ""))
++                fn = fn if fn.endswith(".docx") else fn + ".docx"
++                template_filenames.append(fn)
+                 template_names.append(r.get("Name", ""))
+         copied = copy_templates_to_output(config, opt, template_filenames)
+ 
+     total = len(copied)
+     logger.write_header(option_key, package_label, total)
+ 
+-    results = []
+-    used_names = set()
+-    has_locked = [False]
+-    has_other_error = [False]
++    results          = []
+     failed_templates = []
++    has_locked       = [False]
++    has_other_error  = [False]
++
++    # Adapter on_progress cho generator → emit event → update Gradio progress + log
++    # Generator sẽ gọi on_progress per event; ta cần per-file counters
++    file_results = generate_many(
++        template_paths          = list(zip(copied, template_names)),
++        nested_context          = nested_ctx,
++        cfg                     = config,
++        goi_thau_id             = goi_thau_id,
++        tables_rows             = tables_rows,
++        danh_muc_file           = danh_muc_file,
++        key_id                  = left_key,
++        table_placeholder_names = table_placeholder_names,
++        dry_run                 = False,
++        max_retries             = 3,
++        retry_delay             = 2.0,
++        on_progress             = None,  # chúng ta yield từng file bên dưới
++    )
+ 
+-    table_placeholder_names = {
+-        _str(t.get("Name", "")).strip("{} ")
+-        for t in tables_rows
+-        if _str(t.get(key_id)) == goi_thau_id
+-    }
+-
+-    for i, (src_path, tpl_name) in enumerate(zip(copied, template_names)):
++    for i, file_result in enumerate(file_results):
+         if progress_cb:
+-            progress_cb((i + 1) / total, f"Đang xử lý: {tpl_name}")
+-        try:
+-            missing_placeholders = []
+-            try:
+-                jenv = jinja2.Environment()
+-                jenv.filters["date"] = filter_date
+-                jenv.filters["date_long"] = filter_date_long
+-                jenv.filters["number"] = filter_number
+-                jenv.filters["num2text"] = filter_num2text
+-                jenv.filters["day"] = filter_day
+-                jenv.filters["month"] = filter_month
+-                jenv.filters["year"] = filter_year
+-                jenv.filters["add_days"] = filter_add_days
+-                jenv.filters["add_months"] = filter_add_months
+-                jenv.filters["date_diff"] = filter_date_diff
+-                jenv.filters["quarter"] = filter_quarter
+-                jenv.filters["weekday"] = filter_weekday
+-                jenv.filters["date_text"] = filter_date_text
+-
+-                doc = DocxTemplate(str(src_path))
+-                undeclared = doc.get_undeclared_template_variables(jinja_env=jenv)
+-                for var in undeclared:
+-                    var_clean = var.strip()
+-                    if var_clean not in nested_context and var_clean not in table_placeholder_names:
+-                        missing_placeholders.append(var_clean)
+-            except Exception as e:
+-                print(f"⚠️  Lỗi quét placeholder cho {tpl_name}: {e}")
+-
+-            def do_merge(s=src_path):
+-                return mail_merge_safe(s, nested_context, s)
+-
+-            def on_locked_retry(msg):
+-                if progress_cb:
+-                    progress_cb((i + 1) / total, f"{tpl_name}: {msg}")
+-
+-            ok, err = write_with_retry(do_merge, max_retries=3, delay=2.0, yield_fn=on_locked_retry)
+-            if not ok:
+-                raise RuntimeError(err)
++            progress_cb((i + 1) / total, f"Đang xử lý {i + 1}/{total}...")
+ 
+-            if danh_muc_file and danh_muc_file.exists():
+-                try:
+-                    copy_tables_for_file(src_path, config, goi_thau_id, tables_rows, danh_muc_file, left_key)
+-                except PermissionError as table_err:
+-                    if "being used by another process" in str(table_err) or getattr(table_err, 'errno', None) == errno.EACCES:
+-                        raise PermissionError(table_err) from table_err
+-                    raise
+-                except Exception as table_err:
+-                    print(f"⚠️  Lỗi copy bảng: {table_err}")
+-
+-            new_path = rename_output(src_path, goi_thau_id, used_names)
+-
+-            if missing_placeholders:
+-                warn_msg = f"Warning: Placeholder {', '.join('{{' + k + '}}' for k in missing_placeholders)} không có data"
+-                logger.record_ok_with_warning(results, tpl_name, new_path.name, warn_msg)
+-            else:
+-                logger.record_ok(results, tpl_name, new_path.name)
++        display_name = Path(file_result.output_path).name if file_result.output_path else file_result.template_name
++        logger.record_result(results, file_result, display_name)
+ 
+-        except PermissionError as e:
+-            if "being used by another process" in str(e) or getattr(e, 'errno', None) == errno.EACCES:
+-                err_msg = "Không thể ghi file vì đang được mở trong Word.\n   → Vui lòng đóng file này và nhấn \"🔄 Chạy lại file lỗi\""
+-                logger.record_locked(results, tpl_name, has_locked, failed_templates, detail=err_msg)
++        if not file_result.success:
++            err_msg = file_result.error or ""
++            if _is_locked_error(err_msg):
++                has_locked[0] = True
+             else:
+-                logger.record_error(results, tpl_name, e, has_other_error, failed_templates)
+-
+-        except Exception as e:
+-            logger.record_error(results, tpl_name, e, has_other_error, failed_templates)
++                has_other_error[0] = True
++            failed_templates.append(file_result.template_name)
+ 
+         yield "\n".join(results), f"Đang xử lý {i + 1}/{total}...", None
+ 
+     elapsed = time.time() - logger.start_time
+-    summary = f"✅ {logger.ok_count}  ⚠️ {logger.warning_count}  ❌ {logger.error_count}  /  {total} file  ({elapsed:.1f}s)"
+-    
++    summary = (
++        f"✅ {logger.ok_count}  ⚠️ {logger.warning_count}  "
++        f"❌ {logger.error_count}  /  {total} file  ({elapsed:.1f}s)"
++    )
+     logger.write_footer()
+ 
+     retry_state_data = None
+     if failed_templates:
+         retry_state_data = {
+-            "option_key": option_key,
+-            "package_label": package_label,
++            "option_key":       option_key,
++            "package_label":    package_label,
+             "failed_templates": failed_templates,
+-            "all_locked": has_locked[0] and not has_other_error[0],
++            "all_locked":       has_locked[0] and not has_other_error[0],
+         }
+ 
+     yield "\n".join(results), summary, retry_state_data
+ 
+ 
+-async def run_retry_batch(service: KisorService, retry_state: dict, progress_cb: Optional[Callable[[float, str], None]] = None):
++# ──────────────────────────────────────────────
++# run_batch — public entry point
++# ──────────────────────────────────────────────
++
++async def run_batch(
++    service: KisorService,
++    option_key: str,
++    package_label: str,
++    selected_templates: list[str],
++    group_name: str = "",
++    progress_cb: Optional[Callable[[float, str], None]] = None,
++    retry_state: dict | None = None,
++):
++    config = service.config
++    ds     = service.ds
++
++    if not option_key or not option_key.strip():
++        yield "", "⚠️ Vui lòng chọn quy trình", None
++        return
++    if not package_label or not package_label.strip():
++        yield "", "⚠️ Vui lòng chọn gói thầu", None
++        return
++    if not selected_templates:
++        yield "", "⚠️ Vui lòng chọn ít nhất 1 template hoặc thành viên", None
++        return
++
++    opt_config   = service.get_option_config(option_key)
++    sheet        = opt_config.get("sheet", config.DataSheet)
++    key_id       = opt_config.get("key_id", "ID")
++    show_format  = opt_config.get("show", "")
++    if "|" in show_format:
++        show_format = show_format.split("|")[0].strip()
++
++    left_key, right_key = _parse_repeat_key_id(key_id)
++
++    # Query dòng package
++    if opt_config.get("type") == "Repeat":
++        ls, _, _ = _parse_repeat_sheet_config(opt_config)
++        temp_sql = f'SELECT * FROM "{ls}"' if ls else resolve_sheet_query(sheet)
++    else:
++        temp_sql = resolve_sheet_query(sheet)
++
++    temp_rows = ds.query(temp_sql)
++
++    selected_pkg = None
++    for r in temp_rows:
++        if safe_format(show_format, r) == package_label:
++            selected_pkg = r
++            break
++    if not selected_pkg:
++        yield "", "❌ Không tìm thấy dòng dữ liệu tương ứng", None
++        return
++
++    goi_thau_id = _str(selected_pkg.get(left_key))
++
++    if opt_config.get("type") == "Repeat":
++        async for item in _run_batch_repeat(
++            service, option_key, package_label, selected_templates,
++            group_name, goi_thau_id, left_key, right_key, progress_cb, retry_state,
++        ):
++            yield item
++    else:
++        async for item in _run_batch_normal(
++            service, option_key, package_label, selected_templates,
++            goi_thau_id, left_key, selected_pkg, progress_cb, retry_state,
++        ):
++            yield item
++
++
++# ──────────────────────────────────────────────
++# run_retry_batch
++# ──────────────────────────────────────────────
++
++async def run_retry_batch(
++    service: KisorService,
++    retry_state: dict,
++    progress_cb: Optional[Callable[[float, str], None]] = None,
++):
+     if not retry_state or not retry_state.get("failed_templates"):
+         yield "⚠️ Không có file lỗi nào để chạy lại", "⚠️ Không có file lỗi", None
+         return
+-    option_key = retry_state["option_key"]
+-    package_label = retry_state["package_label"]
+-    failed_templates = retry_state["failed_templates"]
+-    group_name = retry_state.get("group_name", "")
++    option_key        = retry_state["option_key"]
++    package_label     = retry_state["package_label"]
++    failed_templates  = retry_state["failed_templates"]
++    group_name        = retry_state.get("group_name", "")
+     async for log, status, new_state in run_batch(
+-        service=service,
+-        option_key=option_key,
+-        package_label=package_label,
+-        selected_templates=failed_templates,
+-        group_name=group_name,
+-        progress_cb=progress_cb,
+-        retry_state=retry_state
++        service            = service,
++        option_key         = option_key,
++        package_label      = package_label,
++        selected_templates = failed_templates,
++        group_name         = group_name,
++        progress_cb        = progress_cb,
++        retry_state        = retry_state,
+     ):
+         yield log, status, new_state
+diff --git a/kisorlib/engine.py b/kisorlib/engine.py
+index bc0dc54..07b8962 100644
+--- a/kisorlib/engine.py
++++ b/kisorlib/engine.py
+@@ -1,26 +1,20 @@
+ """
+-kisorlib/engine.py  — PATCHED
+-──────────────────────────────
+-Fixes so với version cũ:
+-  #1  Package import: relative import đúng (engine.py nằm trong kisorlib/)
+-  #3  _build_context: bỏ method ảo query_row/query_option,
+-      viết lại dùng ds.query() + ds.query_rows(sheet, start, end)
+-  #4  list_packages: bỏ ds.list_package_ids(), thay bằng ds.query()
+-  #5  copy_tables_for_file: đúng 6 tham số như table_copier.py thực tế
+-  #6  DataSet(cfg) — bỏ tham số excel_files không tồn tại
++kisorlib/engine.py — Refactor v3.2
++────────────────────────────────────
++Pydantic I/O + job/log adapter cho REST API.
++
++KHÔNG còn logic merge/copy/retry nội bộ:
++tất cả đi qua generator.generate_many.
+ """
+ 
+ from __future__ import annotations
+ 
+ import logging
+-import shutil
+ import time
+ import traceback
+ from dataclasses import dataclass, field
+ from pathlib import Path
+ from typing import Callable, List, Optional
+-from .service import KisorService
+-from .utils import clean_config_key
+ 
+ from pydantic import BaseModel, field_validator
+ 
+@@ -55,25 +49,16 @@ class GenerateRequest(BaseModel):
+         return [t.strip() for t in v if t.strip()]
+ 
+ 
+-@dataclass
+-class FileResult:
+-    template_name:   str
+-    output_path:     Optional[str]  = None
+-    success:         bool           = False
+-    error:           Optional[str]  = None
+-    dry_run_context: Optional[dict] = None
+-
+-
+ @dataclass
+ class GenerateResult:
+     success:          bool
+-    files:            List[FileResult] = field(default_factory=list)
+-    total:            int              = 0
+-    succeeded:        int              = 0
+-    failed:           int              = 0
+-    skipped:          int              = 0
+-    duration_seconds: float            = 0.0
+-    error:            Optional[str]    = None
++    files:            List = field(default_factory=list)   # List[FileResult]
++    total:            int  = 0
++    succeeded:        int  = 0
++    failed:           int  = 0
++    skipped:          int  = 0
++    duration_seconds: float = 0.0
++    error:            Optional[str] = None
+ 
+     @property
+     def output_paths(self) -> List[str]:
+@@ -109,9 +94,9 @@ def _emit(callback: ProgressCallback, level: str, message: str, **extra) -> None
+ 
+ def _resolve_paths(req: GenerateRequest):
+     """Trả về (data_dir, templates_dir, output_dir, cfg)."""
+-    from .config import load_config  # type: ignore  # FIX #1
+-    cfg = load_config()
+-    data_dir      = cfg.data_path      if not req.excel_path  else Path(req.excel_path).parent
++    from .config import load_config
++    cfg           = load_config()
++    data_dir      = cfg.data_path      if not req.excel_path else Path(req.excel_path).parent
+     templates_dir = cfg.template_path
+     output_dir    = cfg.output_path    if not req.output_dir  else Path(req.output_dir)
+     return data_dir, templates_dir, output_dir, cfg
+@@ -124,12 +109,12 @@ def _find_template_file(templates_dir: Path, option: str, template_name: str) ->
+     flat = templates_dir / f"{template_name}.docx"
+     if flat.exists():
+         return flat
+-    # Glob fallback — giống app.py dòng 949
+     possible = list((templates_dir / option).glob(f"{template_name}*.docx"))
+     return possible[0] if possible else None
+ 
+ 
+ def _prepare_output_dir(output_dir: Path, cb: ProgressCallback) -> None:
++    import shutil
+     if output_dir.exists():
+         backup_root = output_dir.parent / "_backup"
+         backup_root.mkdir(exist_ok=True)
+@@ -140,185 +125,67 @@ def _prepare_output_dir(output_dir: Path, cb: ProgressCallback) -> None:
+     output_dir.mkdir(parents=True, exist_ok=True)
+ 
+ 
+-
+-
+-# FIX #3: Viết lại hoàn toàn — không còn method ảo nào
+-def _build_context(ds, req: GenerateRequest, cfg, cb: ProgressCallback) -> Optional[dict]:
++def _build_context_for_request(ds, req: GenerateRequest, cfg, cb: ProgressCallback):
+     """
+-    Build Jinja2 context từ DataSet.
+-    Logic y hệt run_batch trong app.py (dòng 1008–1054), không có gì mới.
++    Resolve package row + config rows, trả về (flat_ctx, selected_pkg, key_id, left_key).
++    Logic map tập trung qua KisorService + generator.build_context.
+     """
+-    import math as _math
+-    import pandas as _pd
+-    from datetime import datetime as _dt
++    import re as _re
++    from .service import KisorService
++    from .generator import build_context
++    from .utils import _parse_repeat_key_id, resolve_sheet_query
+ 
+     opt_config = KisorService(cfg, ds).get_option_config(req.option)
+     sheet      = opt_config.get("sheet", "GoiThau")
+     key_id     = opt_config.get("key_id", "ID")
++    left_key, _ = _parse_repeat_key_id(key_id)
+ 
+-    # Query GoiThau (hoặc sheet tương đương)
+     try:
+-        goi_thau_rows = ds.query(f'SELECT * FROM "{sheet}"')
++        goi_thau_rows = ds.query(resolve_sheet_query(sheet))
+     except Exception as exc:
+         _emit(cb, LEVEL_ERROR, f"Lỗi query sheet '{sheet}': {exc}")
+-        return None
++        return None, None, key_id, left_key
+ 
+     selected_pkg = next(
+         (r for r in goi_thau_rows
+-         if str(r.get(key_id, "")).strip() == req.package_id),
++         if str(r.get(left_key, "")).strip() == req.package_id),
+         None,
+     )
+     if selected_pkg is None:
+         _emit(cb, LEVEL_ERROR,
+-              f"Không tìm thấy package_id='{req.package_id}' "
+-              f"trong sheet '{sheet}' (cột '{key_id}')")
+-        return None
++              f"Không tìm thấy package_id='{req.package_id}' trong sheet '{sheet}'")
++        return None, None, key_id, left_key
+ 
+-    # Query Config rows — FIX #3: dùng ds.query_rows(sheet, start, end) đúng signature
+-    config_rows: list[dict] = []
++    # Config rows — hỗ trợ config_row_range
++    svc = KisorService(cfg, ds)
+     if req.config_row_range:
+-        import re as _re
+         m = _re.match(r"^(\d+)-(\d+)$", req.config_row_range.strip())
+         if m:
+             config_rows = ds.query_rows("Config", int(m.group(1)), int(m.group(2)))
+-    if not config_rows:
+-        try:
+-            config_rows = ds.query("SELECT * FROM Config")
+-        except Exception:
+-            config_rows = []
+-
+-    # Build context phẳng — y hệt app.py dòng 1030–1051
+-    ctx: dict = {}
+-    for r in config_rows:
+-        key = str(r.get("Key", "") or "").strip()
+-        col = str(r.get("Value", "") or "").strip()
+-        if not key or not col:
+-            continue
+-        clean_key = clean_config_key(key)
+-        raw_value = selected_pkg.get(col, "")
+-        try:
+-            is_na = _pd.isna(raw_value)
+-        except (TypeError, ValueError):
+-            is_na = False
+-        if is_na:
+-            raw_value = ""
+-        elif isinstance(raw_value, _dt):
+-            raw_value = raw_value.strftime("%d/%m/%Y")
+-        elif raw_value is None:
+-            raw_value = ""
+-        ctx[clean_key] = str(raw_value)
++        else:
++            config_rows = svc.get_config_for_option(req.option)
++    else:
++        config_rows = svc.get_config_for_option(req.option)
+ 
+-    return ctx
++    flat_ctx = build_context(selected_pkg, config_rows)
++    return flat_ctx, selected_pkg, key_id, left_key
+ 
+ 
+ # ──────────────────────────────────────────────
+-# 4. Single-file processing
+-# ──────────────────────────────────────────────
+-
+-def _process_one(
+-    template_path:  Path,
+-    template_name:  str,
+-    output_path:    Path,
+-    context:        dict,
+-    cfg,
+-    goi_thau_id:    str,
+-    tables_data:    list,
+-    danh_muc_file:  Optional[Path],
+-    key_id:         str,
+-    dry_run:        bool,
+-    cb:             ProgressCallback,
+-) -> FileResult:
+-    """
+-    Copy template → mail_merge → copy_tables → rename.
+-    FIX #5: copy_tables_for_file(doc_path, config, goi_thau_id,
+-                                  tables_data, xlsx_path, key_id)
+-    """
+-    from .merger       import mail_merge_safe       # type: ignore  # FIX #1
+-    from .table_copier import copy_tables_for_file  # type: ignore
+-    from .file_utils   import rename_output         # type: ignore
+-
+-    result = FileResult(template_name=template_name)
+-
+-    try:
+-        if dry_run:
+-            _emit(cb, LEVEL_INFO, f"[DRY-RUN] {template_name}")
+-            result.success        = True
+-            result.dry_run_context = context
+-            return result
+-
+-        # 1. Copy template → output
+-        shutil.copy2(str(template_path), str(output_path))
+-        _emit(cb, LEVEL_INFO, f"[1/3] Copy: {template_name}")
+-
+-        # 2. Mail merge
+-        from datetime import datetime as _dt
+-        from .app_helpers import make_nested_dict  # type: ignore
+-
+-        nested_ctx = make_nested_dict(context)
+-        nested_ctx["now"] = _dt.now()
+-
+-        ok, err = mail_merge_safe(output_path, nested_ctx, output_path)
+-        if not ok:
+-            raise RuntimeError(f"mail_merge_safe: {err}")
+-        _emit(cb, LEVEL_INFO, f"[2/3] Merge: {template_name}")
+-
+-        # 3. Copy bảng — QUAN TRỌNG: sau mail_merge (DebugUndefined)
+-        # FIX #5: signature đúng
+-        if danh_muc_file and danh_muc_file.exists():
+-            try:
+-                copy_tables_for_file(
+-                    output_path,    # doc_path: Path
+-                    cfg,            # config: AppConfig
+-                    goi_thau_id,    # goi_thau_id: str
+-                    tables_data,    # tables_data: list[dict]
+-                    danh_muc_file,  # xlsx_path: Path
+-                    key_id,         # key_id: str
+-                )
+-                _emit(cb, LEVEL_INFO, f"[3/3] Bảng: {template_name}")
+-            except PermissionError:
+-                raise
+-            except Exception as te:
+-                _emit(cb, LEVEL_WARNING, f"⚠️ Lỗi copy bảng (bỏ qua): {te}")
+-
+-        # 4. Rename
+-        used_names: set[str] = set()
+-        new_path = rename_output(output_path, goi_thau_id, used_names)
+-
+-        result.success     = True
+-        result.output_path = str(new_path)
+-        _emit(cb, LEVEL_SUCCESS,
+-              f"✓ {template_name} → {new_path.name}",
+-              template_name=template_name,
+-              output_name=new_path.name)
+-
+-    except PermissionError as exc:
+-        result.error   = "File đang mở trong Word — đóng lại và chạy lại"
+-        result.success = False
+-        _emit(cb, LEVEL_ERROR,
+-              f"🔒 {template_name}: {result.error}",
+-              template_name=template_name,
+-              is_locked=True)
+-
+-    except Exception as exc:
+-        result.error   = f"{type(exc).__name__}: {exc}"
+-        result.success = False
+-        _emit(cb, LEVEL_ERROR,
+-              f"✗ {template_name}: {result.error}",
+-              template_name=template_name,
+-              is_locked=False,
+-              traceback=traceback.format_exc())
+-
+-    return result
+-
+-
+-# ──────────────────────────────────────────────
+-# 5. Public entry point
++# 4. Public entry point
+ # ──────────────────────────────────────────────
+ 
+ def generate_documents(
+     request:     GenerateRequest,
+     on_progress: ProgressCallback = None,
+ ) -> GenerateResult:
++    from datetime import datetime as _dt
++    from .app_helpers import make_nested_dict
++    from .config import load_config
++    from .dataset import DataSet
++    from .file_utils import copy_templates_to_output
++    from .generator import FileResult, generate_many
++
+     t_start = time.monotonic()
+     cb      = on_progress
+ 
+@@ -335,38 +202,42 @@ def generate_documents(
+         _emit(cb, LEVEL_ERROR, f"Lỗi config: {exc}")
+         return GenerateResult(success=False, error=str(exc))
+ 
+-    # FIX #6: DataSet(cfg) — không truyền excel_files
+     try:
+-        from .dataset import DataSet  # type: ignore
+         ds = DataSet(cfg)
+     except Exception as exc:
+         _emit(cb, LEVEL_ERROR, f"Lỗi DataSet: {exc}")
+         return GenerateResult(success=False, error=str(exc))
+ 
+-    # FIX #3: _build_context mới
+-    context = _build_context(ds, request, cfg, cb)
+-    if context is None:
++    # Build context qua generator.build_context (cùng logic với batch)
++    flat_ctx, selected_pkg, key_id, left_key = _build_context_for_request(ds, request, cfg, cb)
++    if flat_ctx is None:
+         return GenerateResult(
+             success=False,
+             error=f"Không có dữ liệu cho '{request.package_id}'"
+         )
+-    _emit(cb, LEVEL_INFO, f"Context: {len(context)} keys")
++    _emit(cb, LEVEL_INFO, f"Context: {len(flat_ctx)} keys")
+ 
+-    # Metadata cho copy_tables
+-    opt_config = KisorService(cfg, ds).get_option_config(request.option)
+-    key_id     = opt_config.get("key_id", "ID")
++    nested_ctx = make_nested_dict(flat_ctx)
++    nested_ctx["now"] = _dt.now()
++
++    # Tables + danh_muc_file
+     try:
+-        tables_data = ds.query("SELECT * FROM Tables")
++        tables_rows = ds.query("SELECT * FROM Tables")
+     except Exception:
+-        tables_data = []
++        tables_rows = []
+ 
+     xlsx_files    = sorted(data_dir.glob("*.xlsx"))
+     danh_muc_file = next(
+-        (f for f in xlsx_files
+-         if "DanhMuc" in f.stem or "danh muc" in f.stem.lower()),
++        (f for f in xlsx_files if cfg.DanhMucFile.lower() in f.stem.lower()),
+         xlsx_files[0] if xlsx_files else None,
+     )
+ 
++    table_placeholder_names = {
++        str(t.get("Name", "")).strip("{} ")
++        for t in tables_rows
++        if str(t.get(left_key, "")).strip() == request.package_id
++    }
++
+     # Chuẩn bị output dir
+     if not request.dry_run:
+         try:
+@@ -375,44 +246,60 @@ def generate_documents(
+             _emit(cb, LEVEL_ERROR, f"Lỗi output dir: {exc}")
+             return GenerateResult(success=False, error=str(exc))
+ 
+-    # Loop templates
++    # Resolve template files
+     total   = len(request.templates)
+-    results: List[FileResult] = []
+     skipped = 0
++    template_paths: list[tuple[Path, str]] = []
++    skipped_results: list[FileResult]      = []
+ 
+-    for idx, tpl_name in enumerate(request.templates, start=1):
+-        _emit(cb, LEVEL_INFO,
+-              f"[{idx}/{total}] {tpl_name}", current=idx, total=total)
+-
++    for tpl_name in request.templates:
+         tpl_path = _find_template_file(templates_dir, request.option, tpl_name)
+         if tpl_path is None:
+             _emit(cb, LEVEL_WARNING, f"Bỏ qua '{tpl_name}': không tìm thấy template")
+-            results.append(FileResult(
++            skipped_results.append(FileResult(
+                 template_name=tpl_name, success=False,
+                 error="Template file không tồn tại"))
+             skipped += 1
+             continue
++        # Copy vào output_dir trước khi generate_many (giống batch)
++        out_copy = output_dir / tpl_path.name
++        if not request.dry_run:
++            import shutil
++            try:
++                shutil.copy2(str(tpl_path), str(out_copy))
++            except Exception as exc:
++                _emit(cb, LEVEL_ERROR, f"Lỗi copy template '{tpl_name}': {exc}")
++                skipped_results.append(FileResult(
++                    template_name=tpl_name, success=False, error=str(exc)))
++                skipped += 1
++                continue
++        template_paths.append((out_copy if not request.dry_run else tpl_path, tpl_name))
++
++    # on_progress adapter: engine log chuẩn
++    def _engine_progress(event: dict):
++        _emit(cb, event.get("level", "info"), event.get("message", ""),
++              **{k: v for k, v in event.items() if k not in ("level", "message")})
++
++    # Gọi core generate_many — cùng pipeline với batch
++    file_results = generate_many(
++        template_paths          = template_paths,
++        nested_context          = nested_ctx,
++        cfg                     = cfg,
++        goi_thau_id             = request.package_id,
++        tables_rows             = tables_rows,
++        danh_muc_file           = danh_muc_file,
++        key_id                  = left_key,
++        table_placeholder_names = table_placeholder_names,
++        dry_run                 = request.dry_run,
++        max_retries             = 3,
++        retry_delay             = 2.0,
++        on_progress             = _engine_progress,
++    )
+ 
+-        out_path = output_dir / tpl_path.name
+-
+-        results.append(_process_one(
+-            template_path = tpl_path,
+-            template_name = tpl_name,
+-            output_path   = out_path,
+-            context       = context,
+-            cfg           = cfg,
+-            goi_thau_id   = request.package_id,
+-            tables_data   = tables_data,
+-            danh_muc_file = danh_muc_file,
+-            key_id        = key_id,
+-            dry_run       = request.dry_run,
+-            cb            = cb,
+-        ))
+-
+-    succeeded = sum(1 for r in results if r.success)
+-    failed    = sum(1 for r in results
+-                    if not r.success and r.error != "Template file không tồn tại")
+-    duration  = time.monotonic() - t_start
++    all_results = skipped_results + file_results
++    succeeded   = sum(1 for r in all_results if r.success)
++    failed      = sum(1 for r in all_results if not r.success and r.error != "Template file không tồn tại")
++    duration    = time.monotonic() - t_start
+ 
+     _emit(cb, LEVEL_SUCCESS if failed == 0 else LEVEL_WARNING,
+           f"═══ Xong: {succeeded}/{total} OK, {failed} lỗi, {skipped} bỏ qua "
+@@ -420,7 +307,7 @@ def generate_documents(
+ 
+     return GenerateResult(
+         success          = (failed == 0),
+-        files            = results,
++        files            = all_results,
+         total            = total,
+         succeeded        = succeeded,
+         failed           = failed,
+@@ -430,28 +317,28 @@ def generate_documents(
+ 
+ 
+ # ──────────────────────────────────────────────
+-# 6. Utilities
++# 5. Utilities
+ # ──────────────────────────────────────────────
+ 
+ def list_templates(option: Optional[str] = None) -> List[str]:
+-    from .config import load_config  # type: ignore
+-    cfg       = load_config()
+-    search    = (cfg.template_path / option) if option else cfg.template_path
++    from .config import load_config
++    cfg    = load_config()
++    search = (cfg.template_path / option) if option else cfg.template_path
+     if not search.exists():
+         return []
+     return sorted(p.stem for p in search.rglob("*.docx"))
+ 
+ 
+ def list_packages(option_key: str = "") -> List[str]:
+-    """FIX #4: bỏ ds.list_package_ids() — dùng ds.query() trực tiếp."""
+-    from .config  import load_config  # type: ignore
+-    from .dataset import DataSet      # type: ignore
++    from .config import load_config
++    from .dataset import DataSet
++    from .service import KisorService
+     try:
+         cfg        = load_config()
+         ds         = DataSet(cfg)
+         opt_config = KisorService(cfg, ds).get_option_config(option_key) if option_key else {}
+         key_id     = opt_config.get("key_id", "ID")
+-        sheet      = opt_config.get("sheet",  "GoiThau")
++        sheet      = opt_config.get("sheet", "GoiThau")
+         rows       = ds.query(f'SELECT DISTINCT "{key_id}" FROM "{sheet}"')
+         return sorted(str(r.get(key_id, "")).strip() for r in rows if r.get(key_id))
+     except Exception:
+diff --git a/kisorlib/generator.py b/kisorlib/generator.py
+new file mode 100644
+index 0000000..8e910df
+--- /dev/null
++++ b/kisorlib/generator.py
+@@ -0,0 +1,453 @@
++"""
++kisorlib/generator.py
++─────────────────────
++Core sync pipeline — single source of truth cho toàn bộ việc sinh văn bản.
++
++Theo Refactor v3.2:
++  - generate_one(...)  : merge 1 file + copy bảng + rename
++  - generate_many(...) : lặp template, gọi generate_one, gom FileResult, gọi on_progress
++  - build_context(...) : Jinja2 context + nested dict; pure/sync
++
++Không import Gradio. Không gọi load_config() bên trong core.
++UI (batch.py) và API (engine.py) chỉ là adapter mỏng gọi vào đây.
++"""
++
++from __future__ import annotations
++
++import errno
++import shutil
++import time
++import traceback
++from dataclasses import dataclass, field
++from datetime import datetime
++from pathlib import Path
++from typing import Callable, Optional
++
++import jinja2
++import pandas as pd
++from docxtpl import DocxTemplate
++
++from .app_helpers import make_nested_dict
++from .filters import (
++    filter_add_days, filter_add_months, filter_date, filter_date_diff,
++    filter_date_long, filter_date_text, filter_day, filter_month,
++    filter_num2text, filter_number, filter_quarter, filter_weekday, filter_year,
++)
++from .file_utils import rename_output
++from .merger import mail_merge_safe
++from .table_copier import copy_tables_for_file
++from .utils import clean_config_key, _str
++
++
++# ──────────────────────────────────────────────
++# Progress event
++# ──────────────────────────────────────────────
++
++OnProgress = Optional[Callable[[dict], None]]
++
++# event schema:
++# {
++#   "level":    "info" | "warning" | "error" | "success",
++#   "message":  str,
++#   "step":     int | None,
++#   "total":    int | None,
++#   "template": str | None,
++# }
++
++def _emit(cb: OnProgress, level: str, message: str, **extra) -> None:
++    if cb is None:
++        return
++    try:
++        cb({"level": level, "message": message, **extra})
++    except Exception:
++        pass
++
++
++# ──────────────────────────────────────────────
++# FileResult (tái xuất để engine/batch dùng)
++# ──────────────────────────────────────────────
++
++@dataclass
++class FileResult:
++    template_name:    str
++    output_path:      Optional[str]  = None
++    success:          bool           = False
++    error:            Optional[str]  = None
++    warnings:         list[str]      = field(default_factory=list)
++    dry_run_context:  Optional[dict] = None
++
++
++# ──────────────────────────────────────────────
++# Jinja2 environment factory
++# ──────────────────────────────────────────────
++
++def _make_jinja_env(undefined=jinja2.DebugUndefined) -> jinja2.Environment:
++    env = jinja2.Environment(undefined=undefined)
++    env.filters["date"]       = filter_date
++    env.filters["date_long"]  = filter_date_long
++    env.filters["number"]     = filter_number
++    env.filters["num2text"]   = filter_num2text
++    env.filters["day"]        = filter_day
++    env.filters["month"]      = filter_month
++    env.filters["year"]       = filter_year
++    env.filters["add_days"]   = filter_add_days
++    env.filters["add_months"] = filter_add_months
++    env.filters["date_diff"]  = filter_date_diff
++    env.filters["quarter"]    = filter_quarter
++    env.filters["weekday"]    = filter_weekday
++    env.filters["date_text"]  = filter_date_text
++    return env
++
++
++# ──────────────────────────────────────────────
++# write_with_retry (moved here from batch.py)
++# ──────────────────────────────────────────────
++
++def write_with_retry(func, max_retries: int = 3, delay: float = 2.0,
++                     on_retry: OnProgress = None) -> tuple[bool, str]:
++    """
++    Thực thi func() có retry khi gặp PermissionError (file đang bị khóa).
++    Luôn trả về (bool, str).
++    """
++    for attempt in range(1, max_retries + 1):
++        try:
++            result = func()
++            if isinstance(result, tuple) and len(result) == 2:
++                return bool(result[0]), str(result[1])
++            return True, ""
++        except PermissionError as e:
++            if "being used by another process" in str(e) or e.errno == errno.EACCES:
++                if attempt == max_retries:
++                    raise
++                msg = f"🔒 File bị khóa – thử lại lần {attempt}/{max_retries} sau {delay:.0f}s..."
++                _emit(on_retry, "warning", msg, template=None)
++                time.sleep(delay)
++            else:
++                raise
++
++
++# ──────────────────────────────────────────────
++# build_context
++# ──────────────────────────────────────────────
++
++def build_context(
++    selected_pkg: dict,
++    config_rows:  list[dict],
++    extra:        dict | None = None,
++) -> dict:
++    """
++    Xây dựng Jinja2 context phẳng từ dòng dữ liệu và mapping Config.
++
++    Tham số:
++        selected_pkg : dòng dữ liệu đã được query (dict)
++        config_rows  : danh sách mapping {Key, Value} từ sheet Config
++        extra        : các key bổ sung thêm vào context sau (VD: HoTen, right_key…)
++
++    Trả về dict phẳng (chưa nested). Caller gọi make_nested_dict() khi cần.
++    """
++    ctx: dict = {}
++    for r in config_rows:
++        key = _str(r.get("Key"))
++        col = _str(r.get("Value"))
++        if not key or not col:
++            continue
++        clean_key = clean_config_key(key)
++        raw_value = selected_pkg.get(col, "")
++        try:
++            is_na = pd.isna(raw_value)
++        except (TypeError, ValueError):
++            is_na = False
++        if is_na:
++            raw_value = ""
++        elif isinstance(raw_value, datetime):
++            raw_value = raw_value.strftime("%d/%m/%Y")
++        elif raw_value is None:
++            raw_value = ""
++        ctx[clean_key] = str(raw_value)
++    if extra:
++        ctx.update(extra)
++    return ctx
++
++
++# ──────────────────────────────────────────────
++# detect_missing_placeholders
++# ──────────────────────────────────────────────
++
++def detect_missing_placeholders(
++    template_path:        Path,
++    nested_context:       dict,
++    table_placeholder_names: set[str],
++) -> list[str]:
++    """
++    Trả về danh sách placeholder trong template không có trong context
++    và không phải là table placeholder.
++    """
++    try:
++        jenv = _make_jinja_env(undefined=jinja2.Undefined)
++        doc  = DocxTemplate(str(template_path))
++        undeclared = doc.get_undeclared_template_variables(jinja_env=jenv)
++        missing = []
++        for var in undeclared:
++            var_clean = var.strip()
++            if var_clean not in nested_context and var_clean not in table_placeholder_names:
++                missing.append(var_clean)
++        return missing
++    except Exception as e:
++        print(f"⚠️  Lỗi quét placeholder cho {template_path.name}: {e}")
++        return []
++
++
++# ──────────────────────────────────────────────
++# generate_one
++# ──────────────────────────────────────────────
++
++def generate_one(
++    *,
++    template_path:    Path,
++    template_name:    str,
++    output_path:      Path,
++    nested_context:   dict,
++    cfg,
++    goi_thau_id:      str,
++    tables_rows:      list[dict],
++    danh_muc_file:    Optional[Path],
++    key_id:           str,
++    used_names:       set[str],
++    table_placeholder_names: set[str] | None = None,
++    dry_run:          bool          = False,
++    max_retries:      int           = 3,
++    retry_delay:      float         = 2.0,
++    on_progress:      OnProgress    = None,
++) -> FileResult:
++    """
++    Sinh 1 file: copy template → mail_merge → copy_tables → rename.
++
++    Không biết về Repeat, không biết về Gradio.
++    Caller (batch / engine) chịu trách nhiệm chuẩn bị nested_context.
++    """
++    result = FileResult(template_name=template_name)
++
++    try:
++        if dry_run:
++            _emit(on_progress, "info", f"[DRY-RUN] {template_name}", template=template_name)
++            result.success = True
++            result.dry_run_context = nested_context
++            return result
++
++        # 1. Copy template → output (với retry)
++        def do_copy():
++            shutil.copy2(str(template_path), str(output_path))
++        write_with_retry(do_copy, max_retries=max_retries, delay=retry_delay,
++                         on_retry=on_progress)
++        _emit(on_progress, "info", f"[1/3] Copy: {template_name}", template=template_name)
++
++        # 2. Detect missing placeholders (trước merge để output warning)
++        if table_placeholder_names is not None:
++            missing = detect_missing_placeholders(output_path, nested_context, table_placeholder_names)
++        else:
++            missing = []
++
++        # 3. Mail merge (DebugUndefined: table placeholders sống qua bước này)
++        def do_merge():
++            return mail_merge_safe(output_path, nested_context, output_path)
++
++        ok, err = write_with_retry(do_merge, max_retries=max_retries, delay=retry_delay,
++                                   on_retry=on_progress)
++        if not ok:
++            raise RuntimeError(err)
++        _emit(on_progress, "info", f"[2/3] Merge: {template_name}", template=template_name)
++
++        # 4. Copy bảng Excel → Word (PHẢI sau mail_merge để table placeholder còn trong file)
++        if danh_muc_file and danh_muc_file.exists():
++            try:
++                copy_tables_for_file(
++                    output_path,    # doc_path
++                    cfg,            # config
++                    goi_thau_id,    # goi_thau_id
++                    tables_rows,    # tables_data
++                    danh_muc_file,  # xlsx_path
++                    key_id,         # key_id
++                )
++                _emit(on_progress, "info", f"[3/3] Bảng: {template_name}", template=template_name)
++            except PermissionError:
++                raise
++            except Exception as te:
++                warn = f"Lỗi copy bảng (bỏ qua): {te}"
++                result.warnings.append(warn)
++                _emit(on_progress, "warning", f"⚠️ {template_name}: {warn}", template=template_name)
++
++        # 5. Rename
++        new_path = rename_output(output_path, goi_thau_id, used_names)
++
++        result.success     = True
++        result.output_path = str(new_path)
++        if missing:
++            warn_msg = f"Placeholder {', '.join('{{' + k + '}}' for k in missing)} không có data"
++            result.warnings.append(warn_msg)
++            _emit(on_progress, "warning",
++                  f"⚠️ {template_name} → {new_path.name}: {warn_msg}",
++                  template=template_name, output_name=new_path.name)
++        else:
++            _emit(on_progress, "success",
++                  f"✓ {template_name} → {new_path.name}",
++                  template=template_name, output_name=new_path.name)
++
++    except PermissionError as exc:
++        result.error   = "File đang mở trong Word — đóng lại và chạy lại"
++        result.success = False
++        _emit(on_progress, "error",
++              f"🔒 {template_name}: {result.error}",
++              template=template_name, is_locked=True)
++
++    except Exception as exc:
++        result.error   = f"{type(exc).__name__}: {exc}"
++        result.success = False
++        _emit(on_progress, "error",
++              f"✗ {template_name}: {result.error}",
++              template=template_name, is_locked=False,
++              traceback=traceback.format_exc())
++
++    return result
++
++
++# ──────────────────────────────────────────────
++# generate_many
++# ──────────────────────────────────────────────
++
++def generate_many(
++    *,
++    template_paths:          list[tuple[Path, str]],   # [(src_path, template_name), ...]
++    nested_context:          dict,
++    cfg,
++    goi_thau_id:             str,
++    tables_rows:             list[dict],
++    danh_muc_file:           Optional[Path],
++    key_id:                  str,
++    table_placeholder_names: set[str] | None = None,
++    dry_run:                 bool             = False,
++    max_retries:             int              = 3,
++    retry_delay:             float            = 2.0,
++    on_progress:             OnProgress       = None,
++) -> list[FileResult]:
++    """
++    Lặp qua danh sách template, gọi generate_one cho từng cái.
++    Sync — không yield, không async.
++
++    Caller (batch.py async) sẽ yield sau mỗi FileResult nếu muốn
++    update UI progressively.
++    """
++    total      = len(template_paths)
++    results    : list[FileResult] = []
++    used_names : set[str]         = set()
++
++    for step, (src_path, tpl_name) in enumerate(template_paths, start=1):
++        _emit(on_progress, "info",
++              f"[{step}/{total}] {tpl_name}",
++              step=step, total=total, template=tpl_name)
++
++        # Output path = cùng thư mục với src (output_path đã được batch/engine copy vào)
++        out_path = src_path  # src_path đã là file trong output folder sau copy_templates_to_output
++
++        result = generate_one(
++            template_path           = src_path,
++            template_name           = tpl_name,
++            output_path             = out_path,
++            nested_context          = nested_context,
++            cfg                     = cfg,
++            goi_thau_id             = goi_thau_id,
++            tables_rows             = tables_rows,
++            danh_muc_file           = danh_muc_file,
++            key_id                  = key_id,
++            used_names              = used_names,
++            table_placeholder_names = table_placeholder_names,
++            dry_run                 = dry_run,
++            max_retries             = max_retries,
++            retry_delay             = retry_delay,
++            on_progress             = on_progress,
++        )
++        results.append(result)
++
++    return results
++
++
++# ──────────────────────────────────────────────
++# Repeat orchestration helper
++# ──────────────────────────────────────────────
++
++def generate_one_repeat(
++    *,
++    template_path:   Path,
++    template_name:   str,
++    member_name:     str,
++    nested_context:  dict,
++    cfg,
++    goi_thau_id:     str,
++    tables_rows:     list[dict],
++    danh_muc_file:   Optional[Path],
++    key_id:          str,
++    max_retries:     int          = 3,
++    retry_delay:     float        = 2.0,
++    on_progress:     OnProgress   = None,
++) -> FileResult:
++    """
++    Sinh 1 file cho 1 thành viên trong Repeat.
++    Copy template → rename output path → merge → copy_tables → rename final.
++    """
++    result = FileResult(template_name=member_name)
++    used_names: set[str] = set()
++
++    try:
++        dst = cfg.output_path / template_path.name
++
++        def do_copy():
++            shutil.copy2(str(template_path), str(dst))
++        write_with_retry(do_copy, max_retries=max_retries, delay=retry_delay,
++                         on_retry=on_progress)
++
++        def do_merge():
++            return mail_merge_safe(dst, nested_context, dst)
++
++        ok, err = write_with_retry(do_merge, max_retries=max_retries, delay=retry_delay,
++                                   on_retry=on_progress)
++        if not ok:
++            raise RuntimeError(err)
++
++        if danh_muc_file and danh_muc_file.exists():
++            try:
++                copy_tables_for_file(dst, cfg, goi_thau_id, tables_rows, danh_muc_file, key_id)
++            except PermissionError:
++                raise
++            except Exception as te:
++                warn = f"Lỗi copy bảng: {te}"
++                result.warnings.append(warn)
++                _emit(on_progress, "warning", f"⚠️ {member_name}: {warn}", template=member_name)
++
++        # Rename: stem-goi_thau_id-member_name.docx
++        stem = template_path.stem.replace("-Template", "")
++        new_filename = f"{stem}-{goi_thau_id}-{member_name}.docx"
++        new_path = cfg.output_path / new_filename
++        if dst.exists():
++            dst.rename(new_path)
++
++        result.success     = True
++        result.output_path = str(new_path)
++        _emit(on_progress, "success",
++              f"✓ {member_name} → {new_path.name}",
++              template=member_name, output_name=new_path.name)
++
++    except PermissionError:
++        result.error   = "File đang mở trong Word — đóng lại và chạy lại"
++        result.success = False
++        _emit(on_progress, "error",
++              f"🔒 {member_name}: {result.error}",
++              template=member_name, is_locked=True)
++
++    except Exception as exc:
++        result.error   = f"{type(exc).__name__}: {exc}"
++        result.success = False
++        _emit(on_progress, "error",
++              f"✗ {member_name}: {result.error}",
++              template=member_name, is_locked=False,
++              traceback=traceback.format_exc())
++
++    return result
+diff --git a/kisorlib/sql_join.py b/kisorlib/sql_join.py
+new file mode 100644
+index 0000000..5c5c6fe
+--- /dev/null
++++ b/kisorlib/sql_join.py
+@@ -0,0 +1,128 @@
++"""
++kisorlib/sql_join.py — Refactor v3.2 (Phase B)
++────────────────────────────────────────────────
++SQL join helpers, tách ra từ utils.py.
++
++Exports:
++  - _OP_MAP, _JOIN_RE
++  - validate_sql_identifier
++  - parse_join_expression
++  - resolve_sheet_query
++  - _parse_repeat_sheet_config
++"""
++
++import re
++
++_JOIN_RE = re.compile(r'.+\s+(?:<\*>|<\*|\*>|\*)\s+.+\s*@\s*.+', re.DOTALL)
++
++# Thứ tự ưu tiên: <*> trước <* trước *> trước *
++_OP_MAP = [
++    (" <*>", "FULL OUTER JOIN"),
++    (" <*",  "LEFT JOIN"),
++    (" *>",  "RIGHT JOIN"),
++    (" *",   "INNER JOIN"),
++]
++
++
++def validate_sql_identifier(name: str) -> str:
++    if not name:
++        return ""
++    pattern = r"^[A-Za-z0-9_\s\-\.\#\u00C0-\u1EF9]+$"
++    if not re.match(pattern, name):
++        raise ValueError(
++            f"⚠️ Cảnh báo bảo mật: Phát hiện ký tự không hợp lệ trong tên bảng "
++            f"hoặc cột (SQL Injection Risk): '{name}'"
++        )
++    return name
++
++
++def parse_join_expression(expr: str) -> str:
++    """
++    Cú pháp rút gọn cho cột Sheet trong Options:
++      Table1 <* Table2 @ key           → LEFT JOIN, cùng tên cột
++      Table1 <* Table2 @ key1 = key2   → LEFT JOIN, khác tên cột
++      Table1 *> Table2 @ key           → RIGHT JOIN
++      Table1 * Table2 @ key            → INNER JOIN
++      Table1 <*> Table2 @ key          → FULL OUTER JOIN
++      SELECT ...                        → passthrough
++    """
++    s = expr.strip()
++    if s.lower().startswith("select"):
++        return s
++    if "@" not in s:
++        return f'SELECT * FROM "{validate_sql_identifier(s)}"'
++
++    join_part, key_raw = s.split("@", 1)
++    join_part = join_part.strip()
++    key_raw   = key_raw.strip()
++
++    join_type = None
++    t1 = t2 = ""
++    for sym, jt in _OP_MAP:
++        if sym in join_part:
++            join_type = jt
++            left, right = join_part.split(sym.strip(), 1)
++            t1 = validate_sql_identifier(left.strip())
++            t2 = validate_sql_identifier(right.strip())
++            break
++
++    if not join_type:
++        return f'SELECT * FROM "{validate_sql_identifier(s)}"'
++
++    if "=" in key_raw:
++        k1, k2 = [validate_sql_identifier(k.strip()) for k in key_raw.split("=", 1)]
++    else:
++        k1 = k2 = validate_sql_identifier(key_raw)
++
++    return (
++        f'SELECT * FROM "{t1}" {join_type} "{t2}" '
++        f'ON "{t1}"."{k1}" = "{t2}"."{k2}"'
++    )
++
++
++def resolve_sheet_query(sheet_name: str) -> str:
++    """
++    Chuyển đổi giá trị cột Sheet trong Options thành SQL:
++    - Bắt đầu bằng SELECT → passthrough
++    - Khớp pattern join rút gọn → gọi parse_join_expression
++    - Còn lại → SELECT * FROM "<sheet_name>"
++    """
++    s = sheet_name.strip()
++    if not s:
++        return f'SELECT * FROM "{s}"'
++    if s.lower().startswith("select"):
++        return s
++    if _JOIN_RE.match(s):
++        return parse_join_expression(s)
++    return f'SELECT * FROM "{validate_sql_identifier(s)}"'
++
++
++def _parse_repeat_sheet_config(opt_config: dict) -> tuple[str, str, str]:
++    """
++    Phân tích cột Sheet dạng join rút gọn.
++    Trả về (left_sheet, right_sheet, join_key).
++    """
++    sheet_expr = opt_config.get("sheet", "").strip()
++    if "@" not in sheet_expr:
++        return validate_sql_identifier(sheet_expr), "", ""
++
++    join_part, key_raw = sheet_expr.split("@", 1)
++    join_part = join_part.strip()
++    key_raw   = key_raw.strip()
++
++    if "=" in key_raw:
++        parts    = [validate_sql_identifier(k.strip()) for k in key_raw.split("=", 1)]
++        join_key = f"{parts[0]} = {parts[1]}"
++    else:
++        join_key = validate_sql_identifier(key_raw)
++
++    for sym, _ in _OP_MAP:
++        if sym in join_part:
++            left, right = join_part.split(sym.strip(), 1)
++            return (
++                validate_sql_identifier(left.strip()),
++                validate_sql_identifier(right.strip()),
++                join_key,
++            )
++
++    return validate_sql_identifier(sheet_expr), "", ""
+diff --git a/kisorlib/utils.py b/kisorlib/utils.py
+index ecb2231..91c97c8 100644
+--- a/kisorlib/utils.py
++++ b/kisorlib/utils.py
+@@ -2,15 +2,16 @@ import math
+ import re
+ import ast
+ 
+-_JOIN_RE = re.compile(r'.+\s+(?:<\*>|<\*|\*>|\*)\s+.+\s*@\s*.+', re.DOTALL)
+-
+-# Bảng ánh xạ toán tử join rút gọn → SQL JOIN (thứ tự ưu tiên: <*> trước <* trước *> trước *)
+-_OP_MAP = [
+-    (" <*>", "FULL OUTER JOIN"),
+-    (" <*",  "LEFT JOIN"),
+-    (" *>",  "RIGHT JOIN"),
+-    (" *",   "INNER JOIN"),
+-]
++# ── SQL join helpers đã chuyển sang sql_join.py (Refactor v3.2 Phase B) ──
++# Re-export để giữ backward-compat với code import từ utils trực tiếp.
++from .sql_join import (          # noqa: F401
++    _JOIN_RE,
++    _OP_MAP,
++    validate_sql_identifier,
++    parse_join_expression,
++    resolve_sheet_query,
++    _parse_repeat_sheet_config,
++)
+ 
+ 
+ def _str(val, default="") -> str:
+@@ -22,17 +23,6 @@ def _str(val, default="") -> str:
+     return str(val).strip()
+ 
+ 
+-def validate_sql_identifier(name: str) -> str:
+-    if not name:
+-        return ""
+-    # Whitelist pattern for secure column/table name formatting
+-    pattern = r"^[A-Za-z0-9_\s\-\.\#\u00C0-\u1EF9]+$"
+-    if not re.match(pattern, name):
+-        raise ValueError(f"⚠️ Cảnh báo bảo mật: Phát hiện ký tự không hợp lệ trong tên bảng hoặc cột (SQL Injection Risk): '{name}'")
+-    return name
+-
+-
+-
+ def clean_config_key(key: str) -> str:
+     clean = key.strip("<>{}| ")
+     
+@@ -173,103 +163,6 @@ def _safe_eval_condition(expr: str, context: dict) -> bool:
+     return bool(eval_node(node.body))
+ 
+ 
+-def parse_join_expression(expr: str) -> str:
+-    """
+-    Cú pháp rút gọn cho cột Sheet trong Options:
+-      Table1 <* Table2 @ key           → LEFT JOIN, cùng tên cột
+-      Table1 <* Table2 @ key1 = key2   → LEFT JOIN, khác tên cột
+-      Table1 *> Table2 @ key           → RIGHT JOIN
+-      Table1 * Table2 @ key            → INNER JOIN
+-      Table1 <*> Table2 @ key          → FULL OUTER JOIN
+-      SELECT ...                        → truyền thẳng cho DuckDB
+-    """
+-    s = expr.strip()
+-    if s.lower().startswith("select"):
+-        return s
+-    if "@" not in s:
+-        return f'SELECT * FROM "{validate_sql_identifier(s)}"'
+-
+-    join_part, key_raw = s.split("@", 1)
+-    join_part = join_part.strip()
+-    key_raw   = key_raw.strip()
+-
+-    join_type = None
+-    t1 = t2 = ""
+-    for sym, jt in _OP_MAP:
+-        if sym in join_part:
+-            join_type = jt
+-            left, right = join_part.split(sym.strip(), 1)
+-            t1 = validate_sql_identifier(left.strip())
+-            t2 = validate_sql_identifier(right.strip())
+-            break
+-
+-    if not join_type:
+-        return f'SELECT * FROM "{validate_sql_identifier(s)}"'
+-
+-    if "=" in key_raw:
+-        k1, k2 = [validate_sql_identifier(k.strip()) for k in key_raw.split("=", 1)]
+-    else:
+-        k1 = k2 = validate_sql_identifier(key_raw)
+-
+-    return (
+-        f'SELECT * FROM "{t1}" {join_type} "{t2}" '
+-        f'ON "{t1}"."{k1}" = "{t2}"."{k2}"'
+-    )
+-
+-
+-def resolve_sheet_query(sheet_name: str) -> str:
+-    """
+-    Chuyển đổi giá trị cột Sheet trong Options thành SQL:
+-    - Bắt đầu bằng SELECT → passthrough
+-    - Khớp pattern join rút gọn → gọi parse_join_expression
+-    - Còn lại → SELECT * FROM "<sheet_name>"
+-    """
+-    s = sheet_name.strip()
+-    if not s:
+-        return f'SELECT * FROM "{s}"'
+-    if s.lower().startswith("select"):
+-        return s
+-    if _JOIN_RE.match(s):
+-        return parse_join_expression(s)
+-    return f'SELECT * FROM "{validate_sql_identifier(s)}"'
+-
+-
+-def _parse_repeat_sheet_config(opt_config: dict) -> tuple[str, str, str]:
+-    """
+-    Phân tích cột Sheet dạng join rút gọn:
+-      GoiThau * TCGTTD @ GoiThau_ID          → INNER JOIN
+-      GoiThau <* TCGTTD @ GoiThau_ID         → LEFT JOIN
+-      GoiThau *> TCGTTD @ GoiThau_ID         → RIGHT JOIN
+-      GoiThau <*> TCGTTD @ GoiThau_ID        → FULL OUTER JOIN
+-    Trả về (left_sheet, right_sheet, join_key).
+-    Dùng cùng _OP_MAP với parse_join_expression để tránh split sai khi gặp <*> hay *>.
+-    """
+-    sheet_expr = opt_config.get("sheet", "").strip()
+-
+-    # Không có dấu @ → không phải join → trả về sheet đơn
+-    if "@" not in sheet_expr:
+-        return validate_sql_identifier(sheet_expr), "", ""
+-
+-    join_part, key_raw = sheet_expr.split("@", 1)
+-    join_part = join_part.strip()
+-    
+-    key_raw = key_raw.strip()
+-    if "=" in key_raw:
+-        parts = [validate_sql_identifier(k.strip()) for k in key_raw.split("=", 1)]
+-        join_key = f"{parts[0]} = {parts[1]}"
+-    else:
+-        join_key = validate_sql_identifier(key_raw)
+-
+-    # Dùng chung constant _OP_MAP (theo thứ tự ưu tiên: <*> trước <* trước *> trước *)
+-    for sym, _ in _OP_MAP:
+-        if sym in join_part:
+-            left, right = join_part.split(sym.strip(), 1)
+-            return validate_sql_identifier(left.strip()), validate_sql_identifier(right.strip()), join_key
+-
+-    # Không khớp operator nào → trả về sheet đơn
+-    return validate_sql_identifier(sheet_expr), "", ""
+-
+-
+ def _parse_repeat_key_id(key_id_expr: str) -> tuple[str, str]:
+     """
+     Phân tích cấu hình KeyId dạng: 'GoiThau_ID | CCCD'
+diff --git a/tests/test_generator.py b/tests/test_generator.py
+new file mode 100644
+index 0000000..a028b78
+--- /dev/null
++++ b/tests/test_generator.py
+@@ -0,0 +1,356 @@
++"""
++tests/test_generator.py
++────────────────────────
++Unit test cho kisorlib/generator.py (Refactor v3.2).
++"""
++
++import pytest
++from unittest.mock import MagicMock, patch, call
++from pathlib import Path
++from datetime import datetime
++
++from kisorlib.generator import (
++    build_context,
++    generate_many,
++    generate_one,
++    generate_one_repeat,
++    write_with_retry,
++    FileResult,
++    _emit,
++    _make_jinja_env,
++)
++
++
++# ──────────────────────────────────────────────
++# build_context
++# ──────────────────────────────────────────────
++
++class TestBuildContext:
++    def test_basic_mapping(self):
++        config_rows = [
++            {"Key": "TenGoiThau", "Value": "TenCot"},
++            {"Key": "NgayKy", "Value": "NgayKyCot"},
++        ]
++        pkg = {"TenCot": "Gói thầu ABC", "NgayKyCot": "2024-01-01"}
++        ctx = build_context(pkg, config_rows)
++        assert ctx["TenGoiThau"] == "Gói thầu ABC"
++        assert ctx["NgayKy"] == "2024-01-01"
++
++    def test_nan_becomes_empty(self):
++        import math
++        config_rows = [{"Key": "Field", "Value": "Col"}]
++        pkg = {"Col": float("nan")}
++        ctx = build_context(pkg, config_rows)
++        assert ctx["Field"] == ""
++
++    def test_none_becomes_empty(self):
++        config_rows = [{"Key": "Field", "Value": "Col"}]
++        pkg = {"Col": None}
++        ctx = build_context(pkg, config_rows)
++        assert ctx["Field"] == ""
++
++    def test_datetime_formatted(self):
++        config_rows = [{"Key": "NgayKy", "Value": "NgayKyCot"}]
++        dt = datetime(2024, 3, 15)
++        pkg = {"NgayKyCot": dt}
++        ctx = build_context(pkg, config_rows)
++        assert ctx["NgayKy"] == "15/03/2024"
++
++    def test_extra_merged(self):
++        config_rows = [{"Key": "Field", "Value": "Col"}]
++        pkg = {"Col": "value"}
++        ctx = build_context(pkg, config_rows, extra={"HoTen": "Nguyen Van A"})
++        assert ctx["Field"] == "value"
++        assert ctx["HoTen"] == "Nguyen Van A"
++
++    def test_skips_empty_key_or_value(self):
++        config_rows = [
++            {"Key": "", "Value": "Col"},
++            {"Key": "Field", "Value": ""},
++            {"Key": "OK", "Value": "OKCol"},
++        ]
++        pkg = {"Col": "v1", "OKCol": "v3"}
++        ctx = build_context(pkg, config_rows)
++        assert "OK" in ctx
++        assert len([k for k in ctx if k not in ("OK",)]) == 0
++
++    def test_clean_config_key_applied(self):
++        config_rows = [{"Key": "<<NgayKy.Date>>", "Value": "NgayKyCot"}]
++        pkg = {"NgayKyCot": "2024-01-01"}
++        ctx = build_context(pkg, config_rows)
++        # clean_config_key strips <> and maps .Date → _Date
++        assert "NgayKy_Date" in ctx
++
++
++# ──────────────────────────────────────────────
++# write_with_retry
++# ──────────────────────────────────────────────
++
++class TestWriteWithRetry:
++    def test_success_first_try(self):
++        called = []
++        def func():
++            called.append(1)
++            return True, ""
++        ok, err = write_with_retry(func, max_retries=3)
++        assert ok is True
++        assert len(called) == 1
++
++    def test_returns_tuple(self):
++        def func():
++            return False, "some error"
++        ok, err = write_with_retry(func)
++        assert ok is False
++        assert err == "some error"
++
++    def test_returns_none_means_ok(self):
++        def func():
++            return None
++        ok, err = write_with_retry(func)
++        assert ok is True
++
++    def test_retries_on_permission_error(self):
++        import errno
++        attempts = []
++        def func():
++            attempts.append(1)
++            if len(attempts) < 3:
++                e = PermissionError("being used by another process")
++                e.errno = errno.EACCES
++                raise e
++            return True, ""
++        ok, err = write_with_retry(func, max_retries=3, delay=0)
++        assert ok is True
++        assert len(attempts) == 3
++
++    def test_raises_after_max_retries(self):
++        import errno
++        def func():
++            e = PermissionError("being used by another process")
++            e.errno = errno.EACCES
++            raise e
++        with pytest.raises(PermissionError):
++            write_with_retry(func, max_retries=2, delay=0)
++
++    def test_non_lock_permission_error_raises_immediately(self):
++        def func():
++            raise PermissionError("some other permission issue")
++        with pytest.raises(PermissionError):
++            write_with_retry(func, max_retries=3, delay=0)
++
++
++# ──────────────────────────────────────────────
++# FileResult
++# ──────────────────────────────────────────────
++
++class TestFileResult:
++    def test_defaults(self):
++        fr = FileResult(template_name="test")
++        assert fr.success is False
++        assert fr.output_path is None
++        assert fr.error is None
++        assert fr.warnings == []
++
++    def test_success(self):
++        fr = FileResult(template_name="test", success=True, output_path="/out/file.docx")
++        assert fr.success
++        assert fr.output_path == "/out/file.docx"
++
++
++# ──────────────────────────────────────────────
++# _emit
++# ──────────────────────────────────────────────
++
++class TestEmit:
++    def test_calls_callback(self):
++        events = []
++        _emit(events.append, "info", "hello", step=1)
++        assert len(events) == 1
++        assert events[0]["level"] == "info"
++        assert events[0]["message"] == "hello"
++        assert events[0]["step"] == 1
++
++    def test_none_callback_no_error(self):
++        _emit(None, "info", "hello")  # should not raise
++
++    def test_callback_exception_swallowed(self):
++        def bad_cb(e):
++            raise RuntimeError("oops")
++        _emit(bad_cb, "info", "test")  # should not raise
++
++
++# ──────────────────────────────────────────────
++# _make_jinja_env
++# ──────────────────────────────────────────────
++
++class TestMakeJinjaEnv:
++    def test_has_all_filters(self):
++        env = _make_jinja_env()
++        for name in ("date", "date_long", "number", "num2text", "day", "month",
++                     "year", "add_days", "add_months", "date_diff", "quarter",
++                     "weekday", "date_text"):
++            assert name in env.filters, f"Missing filter: {name}"
++
++
++# ──────────────────────────────────────────────
++# generate_one (unit test với mock)
++# ──────────────────────────────────────────────
++
++class TestGenerateOne:
++    def _make_cfg(self, tmp_path):
++        cfg = MagicMock()
++        cfg.output_path = tmp_path
++        return cfg
++
++    def test_dry_run_returns_context(self, tmp_path):
++        src  = tmp_path / "Template.docx"
++        src.write_bytes(b"fake")
++        dst  = tmp_path / "Output.docx"
++        ctx  = {"TenGoiThau": "ABC"}
++        used = set()
++        cfg  = self._make_cfg(tmp_path)
++
++        result = generate_one(
++            template_path  = src,
++            template_name  = "TestTpl",
++            output_path    = dst,
++            nested_context = ctx,
++            cfg            = cfg,
++            goi_thau_id    = "GT001",
++            tables_rows    = [],
++            danh_muc_file  = None,
++            key_id         = "ID",
++            used_names     = used,
++            dry_run        = True,
++        )
++        assert result.success is True
++        assert result.dry_run_context == ctx
++
++    def test_permission_error_captured(self, tmp_path):
++        src = tmp_path / "Template.docx"
++        src.write_bytes(b"fake")
++        dst = tmp_path / "Output.docx"
++        used = set()
++        cfg  = self._make_cfg(tmp_path)
++
++        with patch("kisorlib.generator.write_with_retry") as mock_retry:
++            # First call (copy) succeeds, second call (merge) raises PermissionError
++            mock_retry.side_effect = [
++                None,  # copy OK (returns None)
++                PermissionError("being used by another process"),
++            ]
++            result = generate_one(
++                template_path  = src,
++                template_name  = "TestTpl",
++                output_path    = dst,
++                nested_context = {},
++                cfg            = cfg,
++                goi_thau_id    = "GT001",
++                tables_rows    = [],
++                danh_muc_file  = None,
++                key_id         = "ID",
++                used_names     = used,
++            )
++        assert result.success is False
++        assert "đang mở" in result.error or "Word" in result.error
++
++    def test_general_exception_captured(self, tmp_path):
++        src = tmp_path / "Template.docx"
++        src.write_bytes(b"fake")
++        dst = tmp_path / "Output.docx"
++        used = set()
++        cfg  = self._make_cfg(tmp_path)
++
++        with patch("kisorlib.generator.write_with_retry") as mock_retry:
++            mock_retry.side_effect = [
++                None,
++                RuntimeError("jinja error"),
++            ]
++            result = generate_one(
++                template_path  = src,
++                template_name  = "TestTpl",
++                output_path    = dst,
++                nested_context = {},
++                cfg            = cfg,
++                goi_thau_id    = "GT001",
++                tables_rows    = [],
++                danh_muc_file  = None,
++                key_id         = "ID",
++                used_names     = used,
++            )
++        assert result.success is False
++        assert "RuntimeError" in result.error or "jinja" in result.error
++
++
++# ──────────────────────────────────────────────
++# generate_many (unit test với mock)
++# ──────────────────────────────────────────────
++
++class TestGenerateMany:
++    def test_returns_results_in_order(self, tmp_path):
++        files   = []
++        results = []
++        cfg     = MagicMock()
++        cfg.output_path = tmp_path
++
++        for i in range(3):
++            p = tmp_path / f"tpl{i}.docx"
++            p.write_bytes(b"fake")
++            files.append((p, f"Tpl{i}"))
++
++        with patch("kisorlib.generator.generate_one") as mock_one:
++            mock_one.side_effect = [
++                FileResult(template_name=f"Tpl{i}", success=True, output_path=str(tmp_path / f"out{i}.docx"))
++                for i in range(3)
++            ]
++            results = generate_many(
++                template_paths = files,
++                nested_context = {},
++                cfg            = cfg,
++                goi_thau_id    = "GT001",
++                tables_rows    = [],
++                danh_muc_file  = None,
++                key_id         = "ID",
++            )
++
++        assert len(results) == 3
++        assert mock_one.call_count == 3
++        assert results[0].template_name == "Tpl0"
++        assert results[2].template_name == "Tpl2"
++
++    def test_on_progress_called_per_file(self, tmp_path):
++        events = []
++        files  = [(tmp_path / f"t{i}.docx", f"T{i}") for i in range(2)]
++        for p, _ in files:
++            p.write_bytes(b"x")
++
++        with patch("kisorlib.generator.generate_one") as mock_one:
++            mock_one.side_effect = [
++                FileResult(template_name="T0", success=True),
++                FileResult(template_name="T1", success=True),
++            ]
++            generate_many(
++                template_paths = files,
++                nested_context = {},
++                cfg            = MagicMock(),
++                goi_thau_id    = "GT001",
++                tables_rows    = [],
++                danh_muc_file  = None,
++                key_id         = "ID",
++                on_progress    = events.append,
++            )
++        # Should have at least 2 "info" events (step announcements)
++        info_events = [e for e in events if e.get("level") == "info"]
++        assert len(info_events) >= 2
++
++    def test_empty_template_list(self, tmp_path):
++        results = generate_many(
++            template_paths = [],
++            nested_context = {},
++            cfg            = MagicMock(),
++            goi_thau_id    = "GT001",
++            tables_rows    = [],
++            danh_muc_file  = None,
++            key_id         = "ID",
++        )
++        assert results == []
