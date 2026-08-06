@@ -1,0 +1,169 @@
+diff --git a/kisorlib/batch.py b/kisorlib/batch.py
+index 7738330..1508390 100644
+--- a/kisorlib/batch.py
++++ b/kisorlib/batch.py
+@@ -97,6 +97,8 @@ class IncrementalRunLogger:
+             if file_result.warnings:
+                 warn_msg = "; ".join(file_result.warnings)
+                 results.append(f"⚠️ {name} → {display_name}\n   → {warn_msg}")
++                # FIX LOG-01: file warning vẫn là thành công → tăng cả ok_count lẫn warning_count
++                self.ok_count += 1
+                 self.warning_count += 1
+                 self.log_event("⚠️", f"{name} → {display_name}", warn_msg)
+             else:
+@@ -279,8 +281,8 @@ async def _run_batch_repeat(
+                 tables_rows    = tables_rows,
+                 danh_muc_file  = danh_muc_file,
+                 key_id         = left_key,
+-                max_retries    = 3,
+-                retry_delay    = 2.0,
++                max_retries    = getattr(config, "FileMaxRetries", 3),   # FIX CFG-01
++                retry_delay    = getattr(config, "FileRetryDelay", 2.0), # FIX CFG-01
+                 on_progress    = on_progress_cb,
+             )
+ 
+@@ -391,9 +393,10 @@ async def _run_batch_normal(
+                     _sh.copy2(str(src), str(dst))
+                     copied.append(dst)
+                     names_actual.append(tn)
+-                except Exception:
+-                    copied.append(dst)
+-                    names_actual.append(tn)
++                except Exception as _copy_err:
++                    # FIX BAT-01: copy thất bại → KHÔNG append dst vào copied
++                    # để tránh generate_one nhận file không tồn tại
++                    print(f"⚠️ Bỏ qua '{tn}' (retry copy thất bại): {_copy_err}")
+         template_names = names_actual
+     else:
+         clear_output_folder(config)
+@@ -426,8 +429,8 @@ async def _run_batch_normal(
+         key_id                  = left_key,
+         table_placeholder_names = table_placeholder_names,
+         dry_run                 = False,
+-        max_retries             = 3,
+-        retry_delay             = 2.0,
++        max_retries             = getattr(config, "FileMaxRetries", 3),   # FIX CFG-01
++        retry_delay             = getattr(config, "FileRetryDelay", 2.0), # FIX CFG-01
+         on_progress             = None,  # chúng ta yield từng file bên dưới
+     )
+ 
+diff --git a/kisorlib/engine.py b/kisorlib/engine.py
+index 07b8962..6248257 100644
+--- a/kisorlib/engine.py
++++ b/kisorlib/engine.py
+@@ -135,7 +135,9 @@ def _build_context_for_request(ds, req: GenerateRequest, cfg, cb: ProgressCallba
+     from .generator import build_context
+     from .utils import _parse_repeat_key_id, resolve_sheet_query
+ 
+-    opt_config = KisorService(cfg, ds).get_option_config(req.option)
++    # FIX ENG-01: khởi tạo KisorService 1 lần duy nhất (tránh query Options 2 lần)
++    svc        = KisorService(cfg, ds)
++    opt_config = svc.get_option_config(req.option)
+     sheet      = opt_config.get("sheet", "GoiThau")
+     key_id     = opt_config.get("key_id", "ID")
+     left_key, _ = _parse_repeat_key_id(key_id)
+@@ -157,7 +159,6 @@ def _build_context_for_request(ds, req: GenerateRequest, cfg, cb: ProgressCallba
+         return None, None, key_id, left_key
+ 
+     # Config rows — hỗ trợ config_row_range
+-    svc = KisorService(cfg, ds)
+     if req.config_row_range:
+         m = _re.match(r"^(\d+)-(\d+)$", req.config_row_range.strip())
+         if m:
+@@ -291,8 +292,8 @@ def generate_documents(
+         key_id                  = left_key,
+         table_placeholder_names = table_placeholder_names,
+         dry_run                 = request.dry_run,
+-        max_retries             = 3,
+-        retry_delay             = 2.0,
++        max_retries             = getattr(cfg, "FileMaxRetries", 3),   # FIX CFG-01
++        retry_delay             = getattr(cfg, "FileRetryDelay", 2.0), # FIX CFG-01
+         on_progress             = _engine_progress,
+     )
+ 
+diff --git a/kisorlib/generator.py b/kisorlib/generator.py
+index 8e910df..54b478a 100644
+--- a/kisorlib/generator.py
++++ b/kisorlib/generator.py
+@@ -235,10 +235,13 @@ def generate_one(
+             return result
+ 
+         # 1. Copy template → output (với retry)
+-        def do_copy():
+-            shutil.copy2(str(template_path), str(output_path))
+-        write_with_retry(do_copy, max_retries=max_retries, delay=retry_delay,
+-                         on_retry=on_progress)
++        # FIX GEN-01: bỏ qua copy khi src == dst (batch đã copy vào output_dir trước)
++        # tránh shutil.SameFileError trên Windows (subclass OSError, không phải PermissionError)
++        if template_path.resolve() != output_path.resolve():
++            def do_copy():
++                shutil.copy2(str(template_path), str(output_path))
++            write_with_retry(do_copy, max_retries=max_retries, delay=retry_delay,
++                             on_retry=on_progress)
+         _emit(on_progress, "info", f"[1/3] Copy: {template_name}", template=template_name)
+ 
+         # 2. Detect missing placeholders (trước merge để output warning)
+@@ -345,8 +348,12 @@ def generate_many(
+               f"[{step}/{total}] {tpl_name}",
+               step=step, total=total, template=tpl_name)
+ 
+-        # Output path = cùng thư mục với src (output_path đã được batch/engine copy vào)
+-        out_path = src_path  # src_path đã là file trong output folder sau copy_templates_to_output
++        # FIX GEN-01: src_path đã là file trong output folder (copy bởi batch/engine).
++        # generate_one cần (template_path, output_path) khác nhau để tránh
++        # shutil.copy2(same, same) → SameFileError trên Windows.
++        # → Template nguồn = src_path (trong output_dir), output = cùng path.
++        # generate_one sẽ bỏ qua bước copy nội bộ khi src == dst.
++        out_path = src_path  # src đã ở output_dir; generate_one merge in-place
+ 
+         result = generate_one(
+             template_path           = src_path,
+diff --git a/kisorlib/service.py b/kisorlib/service.py
+index c7bffc1..6e26a00 100644
+--- a/kisorlib/service.py
++++ b/kisorlib/service.py
+@@ -272,14 +272,19 @@ class KisorService:
+             print(f"⚠️ get_repeat_members: không có right_sheet trong option '{option_key}'")
+             return []
+ 
++        # FIX SVC-01: tên bảng _Goc phải qua _safe_table_name để khớp với tên
++        # mà DataSet._load() đã register (sheet có space/ký tự đặc biệt sẽ bị đổi)
++        from .dataset import _safe_table_name as _stn
++        goc_table = _stn(right_sheet + "_Goc")
++
+         try:
+             if join_key and goi_thau_id:
+                 try:
+-                    rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc" WHERE "{join_key}" = ?', (goi_thau_id,))
++                    rows = self.ds.query(f'SELECT * FROM "{goc_table}" WHERE "{join_key}" = ?', (goi_thau_id,))
+                 except Exception:
+-                    rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc"')
++                    rows = self.ds.query(f'SELECT * FROM "{goc_table}"')
+             else:
+-                rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc"')
++                rows = self.ds.query(f'SELECT * FROM "{goc_table}"')
+         except Exception as e:
+             print(f"❌ get_repeat_members query error: {e}")
+             return []
+@@ -312,14 +317,18 @@ class KisorService:
+         if "|" in show_format:
+             member_show_format = show_format.split("|", 1)[1].strip()
+ 
++        # FIX SVC-01: tên bảng _Goc phải qua _safe_table_name (nhất quán với DataSet._load)
++        from .dataset import _safe_table_name as _stn
++        goc_table = _stn(right_sheet + "_Goc")
++
+         try:
+             if join_key and goi_thau_id:
+                 try:
+-                    all_rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc" WHERE "{join_key}" = ?', (goi_thau_id,))
++                    all_rows = self.ds.query(f'SELECT * FROM "{goc_table}" WHERE "{join_key}" = ?', (goi_thau_id,))
+                 except Exception:
+-                    all_rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc"')
++                    all_rows = self.ds.query(f'SELECT * FROM "{goc_table}"')
+             else:
+-                all_rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc"')
++                all_rows = self.ds.query(f'SELECT * FROM "{goc_table}"')
+         except Exception as e:
+             print(f"❌ register_temporary_tcgttd query error: {e}")
+             return False

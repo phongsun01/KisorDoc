@@ -135,7 +135,9 @@ def _build_context_for_request(ds, req: GenerateRequest, cfg, cb: ProgressCallba
     from .generator import build_context
     from .utils import _parse_repeat_key_id, resolve_sheet_query
 
-    opt_config = KisorService(cfg, ds).get_option_config(req.option)
+    # FIX ENG-01: khởi tạo KisorService 1 lần duy nhất (tránh query Options 2 lần)
+    svc        = KisorService(cfg, ds)
+    opt_config = svc.get_option_config(req.option)
     sheet      = opt_config.get("sheet", "GoiThau")
     key_id     = opt_config.get("key_id", "ID")
     left_key, _ = _parse_repeat_key_id(key_id)
@@ -157,7 +159,6 @@ def _build_context_for_request(ds, req: GenerateRequest, cfg, cb: ProgressCallba
         return None, None, key_id, left_key
 
     # Config rows — hỗ trợ config_row_range
-    svc = KisorService(cfg, ds)
     if req.config_row_range:
         m = _re.match(r"^(\d+)-(\d+)$", req.config_row_range.strip())
         if m:
@@ -292,8 +293,8 @@ def generate_documents(
         key_id                  = left_key,
         table_placeholder_names = table_placeholder_names,
         dry_run                 = request.dry_run,
-        max_retries             = 3,
-        retry_delay             = 2.0,
+        max_retries             = getattr(cfg, "FileMaxRetries", 3),   # FIX CFG-01
+        retry_delay             = getattr(cfg, "FileRetryDelay", 2.0), # FIX CFG-01
         on_progress             = _engine_progress,
     )
 

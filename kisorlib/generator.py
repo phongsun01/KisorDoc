@@ -235,12 +235,14 @@ def generate_one(
             return result
 
         # 1. Copy template → output (với retry)
+        # FIX GEN-01: bỏ qua copy khi src == dst (batch đã copy vào output_dir trước)
+        # tránh shutil.SameFileError trên Windows (subclass OSError, không phải PermissionError)
         if template_path.resolve() != output_path.resolve():
             def do_copy():
                 shutil.copy2(str(template_path), str(output_path))
             write_with_retry(do_copy, max_retries=max_retries, delay=retry_delay,
                              on_retry=on_progress)
-            _emit(on_progress, "info", f"[1/3] Copy: {template_name}", template=template_name)
+        _emit(on_progress, "info", f"[1/3] Copy: {template_name}", template=template_name)
 
         # 2. Detect missing placeholders (trước merge để output warning)
         if table_placeholder_names is not None:
@@ -346,8 +348,12 @@ def generate_many(
               f"[{step}/{total}] {tpl_name}",
               step=step, total=total, template=tpl_name)
 
-        # Output path = cùng thư mục với src (output_path đã được batch/engine copy vào)
-        out_path = src_path  # src_path đã là file trong output folder sau copy_templates_to_output
+        # FIX GEN-01: src_path đã là file trong output folder (copy bởi batch/engine).
+        # generate_one cần (template_path, output_path) khác nhau để tránh
+        # shutil.copy2(same, same) → SameFileError trên Windows.
+        # → Template nguồn = src_path (trong output_dir), output = cùng path.
+        # generate_one sẽ bỏ qua bước copy nội bộ khi src == dst.
+        out_path = src_path  # src đã ở output_dir; generate_one merge in-place
 
         result = generate_one(
             template_path           = src_path,

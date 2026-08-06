@@ -276,14 +276,19 @@ class KisorService:
             print(f"⚠️ get_repeat_members: không có right_sheet trong option '{option_key}'")
             return []
 
+        # FIX SVC-01: tên bảng _Goc phải qua _safe_table_name để khớp với tên
+        # mà DataSet._load() đã register (sheet có space/ký tự đặc biệt sẽ bị đổi)
+        from .dataset import _safe_table_name as _stn
+        goc_table = _stn(right_sheet + "_Goc")
+
         try:
             if join_key and goi_thau_id:
                 try:
-                    rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc" WHERE "{join_key}" = ?', (goi_thau_id,))
+                    rows = self.ds.query(f'SELECT * FROM "{goc_table}" WHERE "{join_key}" = ?', (goi_thau_id,))
                 except Exception:
-                    rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc"')
+                    rows = self.ds.query(f'SELECT * FROM "{goc_table}"')
             else:
-                rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc"')
+                rows = self.ds.query(f'SELECT * FROM "{goc_table}"')
         except Exception as e:
             print(f"❌ get_repeat_members query error: {e}")
             return []
@@ -316,14 +321,18 @@ class KisorService:
         if "|" in show_format:
             member_show_format = show_format.split("|", 1)[1].strip()
 
+        # FIX SVC-01: tên bảng _Goc phải qua _safe_table_name (nhất quán với DataSet._load)
+        from .dataset import _safe_table_name as _stn
+        goc_table = _stn(right_sheet + "_Goc")
+
         try:
             if join_key and goi_thau_id:
                 try:
-                    all_rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc" WHERE "{join_key}" = ?', (goi_thau_id,))
+                    all_rows = self.ds.query(f'SELECT * FROM "{goc_table}" WHERE "{join_key}" = ?', (goi_thau_id,))
                 except Exception:
-                    all_rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc"')
+                    all_rows = self.ds.query(f'SELECT * FROM "{goc_table}"')
             else:
-                all_rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc"')
+                all_rows = self.ds.query(f'SELECT * FROM "{goc_table}"')
         except Exception as e:
             print(f"❌ register_temporary_tcgttd query error: {e}")
             return False

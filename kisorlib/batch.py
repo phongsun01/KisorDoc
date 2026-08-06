@@ -97,6 +97,8 @@ class IncrementalRunLogger:
             if file_result.warnings:
                 warn_msg = "; ".join(file_result.warnings)
                 results.append(f"⚠️ {name} → {display_name}\n   → {warn_msg}")
+                # FIX LOG-01: file warning vẫn là thành công → tăng cả ok_count lẫn warning_count
+                self.ok_count += 1
                 self.warning_count += 1
                 self.log_event("⚠️", f"{name} → {display_name}", warn_msg)
             else:
@@ -279,8 +281,8 @@ async def _run_batch_repeat(
                 tables_rows    = tables_rows,
                 danh_muc_file  = danh_muc_file,
                 key_id         = left_key,
-                max_retries    = 3,
-                retry_delay    = 2.0,
+                max_retries    = getattr(config, "FileMaxRetries", 3),   # FIX CFG-01
+                retry_delay    = getattr(config, "FileRetryDelay", 2.0), # FIX CFG-01
                 on_progress    = on_progress_cb,
             )
 
@@ -391,9 +393,10 @@ async def _run_batch_normal(
                     _sh.copy2(str(src), str(dst))
                     copied.append(dst)
                     names_actual.append(tn)
-                except Exception:
-                    copied.append(dst)
-                    names_actual.append(tn)
+                except Exception as _copy_err:
+                    # FIX BAT-01: copy thất bại → KHÔNG append dst vào copied
+                    # để tránh generate_one nhận file không tồn tại
+                    print(f"⚠️ Bỏ qua '{tn}' (retry copy thất bại): {_copy_err}")
         template_names = names_actual
     else:
         clear_output_folder(config)
@@ -426,8 +429,8 @@ async def _run_batch_normal(
         key_id                  = left_key,
         table_placeholder_names = table_placeholder_names,
         dry_run                 = False,
-        max_retries             = 3,
-        retry_delay             = 2.0,
+        max_retries             = getattr(config, "FileMaxRetries", 3),   # FIX CFG-01
+        retry_delay             = getattr(config, "FileRetryDelay", 2.0), # FIX CFG-01
         on_progress             = None,  # chúng ta yield từng file bên dưới
     )
 

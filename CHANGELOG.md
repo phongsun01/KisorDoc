@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.1.3] - 2026-08-06
+
+### Fixed
+- **LOG-01 (batch.py):** Sửa lỗi đếm thống kê, tăng `ok_count` khi gặp cảnh báo nhưng sinh file thành công.
+- **CFG-01 (batch.py & engine.py):** Chuyển đổi retry delay và max retries sử dụng động từ cấu hình `AppConfig`.
+- **BAT-01 (batch.py):** Ngăn chặn việc append file bị lỗi sao chép vào danh sách render tiếp theo.
+- **ENG-01 (engine.py):** Tối ưu hóa khởi tạo `KisorService` một lần duy nhất.
+- **GEN-01 (generator.py):** Khắc phục lỗi `SameFileError` trên Windows khi sao chép cùng một đường dẫn.
+- **SVC-01 (service.py):** Đồng bộ hóa tên bảng tạm thành viên của Repeat mode (`_Goc`) qua hàm `_safe_table_name` để tránh lỗi với tên Sheet có khoảng trắng hoặc ký tự đặc biệt.
+
 ## [4.1.2] - 2026-08-05
 
 ### Added
