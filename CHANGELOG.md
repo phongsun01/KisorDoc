@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.2.0] - 2026-08-06
+
+### Added
+- **Tính năng Migrate Text to Jinja2 Placeholder:** Tự động chuyển đổi các từ khóa/giá trị mẫu trong Word (.docx) sang thẻ placeholder Jinja2 sử dụng sơ đồ mapping của Excel.
+  - Hỗ trợ giải quyết trùng lặp giá trị mẫu (Collision Warning) và cảnh báo tần suất xuất hiện quá cao (Dense Match Warning).
+  - Thuật toán **Safe Run Replacement** bằng `lxml` xử lý an toàn text bị Word xé nhỏ ra nhiều run, bảo toàn định dạng in nghiêng, in đậm xung quanh.
+  - Tính idempotent ngăn ngừa việc wrap đè placeholder hai lần.
+  - Hỗ trợ chế độ dry-run xuất báo cáo trực quan dạng HTML và Excel.
+- **Unit Tests Hồi Quy:** Bổ sung file test mới [tests/test_migrate_text_to_placeholders.py](tests/test_migrate_text_to_placeholders.py) kiểm thử 100% các logic nghiệp vụ lõi (to_slug, safe_replace, idempotent, load_mapping).
+
 ## [4.1.3] - 2026-08-06
 
 ### Fixed

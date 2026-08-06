@@ -44,7 +44,7 @@ def init() -> KisorService:
 def create_ui():
     service = init()
 
-    _sel = {"opt": "", "pkg": "", "sheet_rows": [], "template_total": 0}
+    _sel = {"opt": "", "pkg": "", "sheet_rows": [], "template_total": 0, "choices": []}
 
     with gr.Blocks(title=ui_labels.get("app_title", "KisorDoc-AI")) as app:
         gr.Markdown(ui_labels.get("app_title", "KisorDoc-AI – Xử lý tài liệu tự động"))
@@ -74,13 +74,16 @@ def create_ui():
                     with gr.Column(scale=1) as template_col:
                         gr.Markdown("### " + ui_labels.get("template_section", "Chọn file template & Chạy"))
                         template_label = gr.Markdown(f'**{ui_labels.get("template_section", "Chọn file template & Chạy")}** (0 file)', visible=True)
+                        template_search = gr.Textbox(placeholder="🔍 Tìm kiếm nhanh...", label="", show_label=False, visible=True)
                         template_checkboxes = gr.CheckboxGroup(label="", choices=[], visible=True)
 
                         with gr.Row():
                             select_all_btn = gr.Button(ui_labels.get("select_all_btn", "✓ Chọn tất cả"), visible=True)
                             deselect_all_btn = gr.Button(ui_labels.get("deselect_all_btn", "✗ Bỏ chọn tất cả"), visible=True)
 
-                        run_btn = gr.Button(ui_labels.get("run_btn", "🚀 Chạy"), variant="primary", size="lg", visible=True)
+                        with gr.Row():
+                            run_btn = gr.Button(ui_labels.get("run_btn", "🚀 Chạy"), variant="primary", size="lg", visible=True)
+                            stop_btn = gr.Button(ui_labels.get("stop_btn", "🛑 Dừng"), variant="stop", size="lg", visible=True, interactive=False)
                         check_btn = gr.Button(ui_labels.get("check_btn", "🔍 Kiểm tra"), variant="secondary", visible=True)
                         preview_box = gr.Textbox(
                             label="Kết quả kiểm tra",
@@ -120,6 +123,7 @@ def create_ui():
             if not opt or not pkg:
                 _sel["template_total"] = 0
                 all_tpls = service.get_all_option_templates(opt)
+                _sel["choices"] = all_tpls
                 return (
                     preview_text,
                     gr.update(choices=all_tpls, value=[], visible=True),
@@ -131,7 +135,8 @@ def create_ui():
                     gr.update(visible=True),
                     gr.update(visible=True),
                     gr.update(visible=True),
-                    gr.update()  # group_radio
+                    gr.update(),  # group_radio
+                    ""
                 )
 
             opt_config = service.get_option_config(opt)
@@ -145,6 +150,7 @@ def create_ui():
                 _sel["template_total"] = len(members)
                 label_text = f"**{ui_labels.get('repeat_member_title', 'Chọn Đối tượng lặp cần xử lý')}** ({len(members)} người)"
                 _sel["pkg"] = pkg
+                _sel["choices"] = members
                 return (
                     preview_text,
                     gr.update(choices=members, value=[], visible=True),
@@ -156,7 +162,8 @@ def create_ui():
                     gr.update(visible=True),
                     gr.update(visible=True),
                     gr.update(visible=True),
-                    gr.update(choices=group_choices, value=group_choices[0] if group_choices else None, visible=True)
+                    gr.update(choices=group_choices, value=group_choices[0] if group_choices else None, visible=True),
+                    ""
                 )
             else:
                 templates = service.get_workflow_templates(opt, pkg, sheet_rows)
@@ -164,6 +171,7 @@ def create_ui():
                 _sel["template_total"] = len(choices)
                 label_text = f"**Chọn template cần xử lý** ({len(choices)} file)"
                 _sel["pkg"] = pkg
+                _sel["choices"] = choices
                 return (
                     preview_text,
                     gr.update(choices=choices, value=[], visible=True),
@@ -175,19 +183,21 @@ def create_ui():
                     gr.update(visible=True),
                     gr.update(visible=True),
                     gr.update(visible=True),
-                    gr.update()  # group_radio — giữ nguyên
+                    gr.update(),  # group_radio — giữ nguyên
+                    ""
                 )
 
         package_radio.change(
             fn=on_package_change,
             inputs=[package_radio, group_radio],
-            outputs=[pkg_preview, template_checkboxes, template_label, last_run_state, retry_btn, preview_box, select_all_btn, deselect_all_btn, run_btn, check_btn, group_radio]
+            outputs=[pkg_preview, template_checkboxes, template_label, last_run_state, retry_btn, preview_box, select_all_btn, deselect_all_btn, run_btn, check_btn, group_radio, template_search]
         )
 
         def on_group_change(group, pkg):
             opt = _sel["opt"]
             if not opt or not pkg:
-                return gr.update(choices=[], value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)")
+                _sel["choices"] = []
+                return gr.update(choices=[], value=[]), gr.update(value="**Chọn template cần xử lý** (0 file)"), ""
             opt_config = service.get_option_config(opt)
             if opt_config.get("type") == "Repeat":
                 sheet_rows = _sel["sheet_rows"]
@@ -197,13 +207,14 @@ def create_ui():
                 members = service.get_repeat_members(goi_thau_id, group, opt)
                 _sel["template_total"] = len(members)
                 label_text = f"**{ui_labels.get('repeat_member_title', 'Chọn Đối tượng lặp cần xử lý')}** ({len(members)} người)"
-                return gr.update(choices=members, value=[]), gr.update(value=label_text)
-            return gr.update(), gr.update()
+                _sel["choices"] = members
+                return gr.update(choices=members, value=[]), gr.update(value=label_text), ""
+            return gr.update(), gr.update(), ""
 
         group_radio.change(
             fn=on_group_change,
             inputs=[group_radio, package_radio],
-            outputs=[template_checkboxes, template_label]
+            outputs=[template_checkboxes, template_label, template_search]
         )
 
         def on_option_change(opt):
@@ -247,6 +258,7 @@ def create_ui():
                         rows = []
                 _sel["sheet_rows"] = rows
                 pkgs = [label for r in rows if (label := safe_format(show_format, r))]
+                _sel["choices"] = all_tpls
             return (
                 gr.update(choices=pkgs, value=None),
                 gr.update(choices=all_tpls, value=[]),
@@ -256,12 +268,13 @@ def create_ui():
                 gr.update(visible=False),
                 gr.update(visible=False),
                 show_group,
+                ""
             )
 
         option_radio.change(
             fn=on_option_change,
             inputs=[option_radio],
-            outputs=[package_radio, template_checkboxes, template_label, pkg_preview, last_run_state, retry_btn, preview_box, group_radio]
+            outputs=[package_radio, template_checkboxes, template_label, pkg_preview, last_run_state, retry_btn, preview_box, group_radio, template_search]
         )
 
         def update_checkbox_label(choices):
@@ -321,15 +334,15 @@ def create_ui():
                 return gr.update(visible=True, value=f"🔄 Chạy lại ({n} file – đã đóng file chưa?)", interactive=True)
             return gr.update(visible=True, value=f"🔄 Chạy lại {n} file lỗi", interactive=True)
 
-        def disable_run():
-            return gr.update(interactive=False)
+        def start_run():
+            return gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False)
 
-        def enable_run():
-            return gr.update(interactive=True)
+        def end_run():
+            return gr.update(interactive=True), gr.update(interactive=False)
 
         run_event = run_btn.click(
-            fn=disable_run,
-            outputs=[run_btn],
+            fn=start_run,
+            outputs=[run_btn, stop_btn, retry_btn],
         ).then(
             fn=_ui_run_batch,
             inputs=[option_radio, package_radio, template_checkboxes, group_radio],
@@ -344,8 +357,8 @@ def create_ui():
             inputs=[last_run_state],
             outputs=[retry_btn],
         ).then(
-            enable_run,
-            outputs=[run_btn],
+            fn=end_run,
+            outputs=[run_btn, stop_btn]
         )
 
         def on_open_folder():
@@ -388,12 +401,9 @@ def create_ui():
             async for log, status, new_state in run_retry_batch(service, retry_state, progress):
                 yield log, status, new_state
 
-        def disable_retry():
-            return gr.update(interactive=False)
-
         retry_event = retry_btn.click(
-            fn=disable_retry,
-            outputs=[retry_btn],
+            fn=start_run,
+            outputs=[run_btn, stop_btn, retry_btn],
         ).then(
             fn=on_retry_click,
             inputs=[last_run_state],
@@ -411,6 +421,29 @@ def create_ui():
             get_retry_label,
             inputs=[last_run_state],
             outputs=[retry_btn],
+        ).then(
+            fn=end_run,
+            outputs=[run_btn, stop_btn]
+        )
+
+        stop_btn.click(
+            fn=lambda: ("🛑 Quy trình xử lý đã bị dừng bởi người dùng.", gr.update(interactive=True), gr.update(interactive=False), gr.update(interactive=True)),
+            outputs=[status_text, run_btn, stop_btn, retry_btn],
+            cancels=[run_event, retry_event]
+        )
+
+        def on_search_change(query, selected):
+            all_choices = _sel.get("choices", [])
+            if not query:
+                return gr.update(choices=all_choices, value=selected)
+            q = query.lower().strip()
+            filtered = [c for c in all_choices if q in c.lower()]
+            return gr.update(choices=filtered, value=selected)
+
+        template_search.change(
+            fn=on_search_change,
+            inputs=[template_search, template_checkboxes],
+            outputs=[template_checkboxes]
         )
 
         def on_rerun():
@@ -418,6 +451,7 @@ def create_ui():
             _sel["pkg"] = ""
             _sel["sheet_rows"] = []
             _sel["template_total"] = 0
+            _sel["choices"] = []
             initial_options = service.get_options()
             return (
                 gr.update(choices=initial_options, value=None),
@@ -434,12 +468,14 @@ def create_ui():
                 gr.update(visible=True),
                 gr.update(visible=True),
                 gr.update(visible=True),
-                gr.update(visible=True)
+                gr.update(visible=True),
+                gr.update(visible=True, interactive=False),  # stop_btn
+                ""  # template_search
             )
 
         rerun_btn.click(
             fn=on_rerun,
-            outputs=[option_radio, package_radio, template_checkboxes, template_label, open_folder_btn, retry_btn, result_log, status_text, tabs, last_run_state, group_radio, select_all_btn, deselect_all_btn, run_btn, check_btn],
+            outputs=[option_radio, package_radio, template_checkboxes, template_label, open_folder_btn, retry_btn, result_log, status_text, tabs, last_run_state, group_radio, select_all_btn, deselect_all_btn, run_btn, stop_btn, check_btn, template_search],
         )
 
     return app

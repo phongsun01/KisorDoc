@@ -8,6 +8,7 @@
   "deselect_all_btn": "✗ Bỏ chọn tất cả",
   "check_btn": "🔍 Kiểm tra",
   "run_btn": "🚀 Chạy",
+  "stop_btn": "🛑 Dừng",
   "retry_btn": "🔄 Chạy lại file lỗi",
   "rerun_btn": "← Quay lại",
   "logs_tab": "2. Log & Kết quả",
