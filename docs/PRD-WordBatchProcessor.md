@@ -1,7 +1,7 @@
 # PRD – Word Batch Processor (KisorDoc-AI)
-**Phiên bản:** 4.0.3  
-**Ngày:** 2026-08-05  
-**Trạng thái:** Production Ready (ver4.0.3)
+**Phiên bản:** 5.0.0  
+**Ngày:** 2026-08-07  
+**Trạng thái:** Production Ready (ver5.0.0)
 
 
 ---
@@ -1091,6 +1091,33 @@ F5 (Version pin)    ← Nice-to-have, làm cuối
 *   **Whitelist định danh SQL:** Tích hợp hàm `validate_sql_identifier` với regex whitelist `^[A-Za-z0-9_\s\-\.\#\u00C0-\u1EF9]+$` để lọc sạch toàn bộ tên bảng và cột động đọc từ Excel trước khi đưa vào SQL, triệt tiêu hoàn toàn nguy cơ SQL Identifier Injection.
 *   **Mở rộng Unit Tests:** Thêm các test case trong [test_utils.py](tests/test_utils.py) để kiểm chứng bộ lọc an toàn với các trường hợp inject ký tự độc hại.
 *   **Cập nhật Tài liệu Lỗi:** Đánh dấu lỗi SQL Identifier Injection đã được khắc phục hoàn toàn trong [known-issues.md](known-issues.md).
+
+---
+
+## 14. Các cập nhật trong Phiên bản 4.1.x & 5.0.0 (2026-08-05 đến 2026-08-07)
+
+### 14.1 Phiên bản 4.1.0: Xử lý triệt để Dual-pipeline
+*   **Module Core Sync `kisorlib/generator.py`:** Tích hợp logic sinh tài liệu đồng bộ làm Single Source of Truth cho cả UI (`batch.py`) và API (`engine.py`).
+*   **Tách module `kisorlib/sql_join.py`:** Di chuyển các tiện ích xử lý SQL Join biểu thức từ `utils.py` sang module mới.
+*   **Unit Tests Hồi Quy:** Bổ sung [tests/test_generator.py](tests/test_generator.py) với 25 test cases kiểm chứng chi tiết hoạt động của core `generator`.
+
+### 14.2 Bản vá 4.1.1 & 4.1.2 & 4.1.3: Cải tiến an toàn & Sửa lỗi
+*   **Sửa lỗi Windows copy:** Khắc phục lỗi `SameFileError` khi core engine cố gắng sao chép một tệp tin đè lên chính nó.
+*   **Nạp template Repeat:** Chỉ truy vấn bảng gói thầu (`left_sheet`) khi lấy danh sách template của Quy trình Lặp, tránh lỗi `BinderException`.
+*   **Fallback đuôi mở rộng Excel:** Tự động điền đuôi `.xlsx` nếu tên file trong cột `File` của bảng cấu hình bị thiếu.
+*   **Đồng bộ hóa thống kê log:** Tăng cả `ok_count` lẫn `warning_count` khi gặp file cảnh báo nhưng sinh thành công.
+*   **Dynamic AppConfig:** Tự động load `FileMaxRetries` và `FileRetryDelay` từ cấu hình cấu trúc thay vì gán cứng.
+
+### 14.3 Phiên bản 5.0.0: Tích hợp Bộ kiểm thử Toàn diện & Search UI
+*   **Thêm Thanh tìm kiếm và nút Dừng trên Gradio UI:** 
+    - Thêm chức năng tìm kiếm trực tiếp các template / đối tượng lặp.
+    - Hỗ trợ nút Stop để dừng tiến trình tạo tài liệu hàng loạt ngay lập tức.
+*   **Bộ 147 Unit Tests Mới:** Tích hợp bộ kiểm thử đầy đủ nâng tổng số test case lên 198, bao gồm:
+    - [tests/test_sql_join.py](tests/test_sql_join.py) (+76 tests)
+    - [tests/test_batch.py](tests/test_batch.py) (+48 tests)
+    - [tests/test_merger.py](tests/test_merger.py) (+23 tests)
+*   **Bảo mật SQL UI:** Chuyển đổi gọi query lấy tên nhóm lặp trong `app.py` sang dạng Parameterized Query `?`.
+*   **Đồng bộ hóa bảng lặp tạm thời:** Áp dụng `_safe_table_name` cho các truy vấn bảng lặp `_Goc` trong `kisorlib/service.py` để tương thích với tên sheet tiếng Việt có dấu/khoảng trắng.
 
 
 
