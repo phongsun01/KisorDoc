@@ -1,5 +1,19 @@
 # Changelog
 
+## [5.0.0] - 2026-08-07
+
+### Added
+- **Bộ 147 Unit Tests Mới (Hồi Quy & Độ Phủ):**
+  - `tests/test_sql_join.py` (+76 tests): Kiểm nghiệm toàn diện logic xử lý SQL Join và resolve truy vấn sheet.
+  - `tests/test_batch.py` (+48 tests): Bao phủ class `IncrementalRunLogger`, các helpers, logic validation và xử lý log sự kiện.
+  - `tests/test_merger.py` (+23 tests): Kiểm chứng hoạt động của cơ chế merge tài liệu `mail_merge` và `mail_merge_safe`.
+- **Khắc Phục Lỗi Hệ Thống (Bản Vá Hồi Quy):**
+  - Sửa lỗi parameterized query trong luồng chọn UI group lặp của `app.py`.
+  - Tối ưu nạp `KisorService` trong `kisorlib/engine.py` (tránh query 2 lần).
+  - Tích hợp hàm `_safe_table_name` cho các truy vấn bảng lặp `_Goc` trong `kisorlib/service.py` để tương thích với sheet có khoảng trắng/ký tự đặc biệt.
+  - Khắc phục lỗi copy template giống nhau `src == dst` trên Windows gây `SameFileError`.
+  - Khắc phục lỗi xử lý warning thống kê log file trong `kisorlib/batch.py`.
+
 ## [4.2.0] - 2026-08-06
 
 ### Added

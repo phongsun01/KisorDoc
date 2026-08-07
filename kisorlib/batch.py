@@ -123,7 +123,10 @@ class IncrementalRunLogger:
         self.log_event("✅", f"{name} → {display_name}")
 
     def record_ok_with_warning(self, results, name, display_name, warn_msg):
+        # FIX LOG-01 compat: file có warning vẫn là thành công → tăng ok_count lẫn warning_count
+        # (Dùng record_result(FileResult) thay hàm này cho code mới)
         results.append(f"⚠️ {name} → {display_name}\n   → {warn_msg}")
+        self.ok_count += 1
         self.warning_count += 1
         self.log_event("⚠️", f"{name} → {display_name}", warn_msg)
 

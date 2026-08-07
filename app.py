@@ -237,7 +237,7 @@ def create_ui():
                     sql = f'SELECT * FROM "{ls}"' if ls else resolve_sheet_query(sheet)
                     opt_code = opt.split(":")[0].strip() if ":" in opt else opt.strip()
                     try:
-                        wf_rows = service.ds.query(f"SELECT DISTINCT Name FROM Workflow WHERE Option = '{opt_code}'")
+                        wf_rows = service.ds.query("SELECT DISTINCT Name FROM Workflow WHERE Option = ?", (opt_code,))
                         group_choices = [str(r["Name"]).strip() for r in wf_rows if r.get("Name")]
                     except Exception:
                         group_choices = ui_labels.get("repeat_group_choices", [])
