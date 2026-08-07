@@ -4,9 +4,9 @@
 
 Chức năng: Migrate Text to Jinja2 Placeholder
 
-| **Phiên bản**  | 1.3                        |
+| **Phiên bản**  | 1.4                        |
 | -------------- | -------------------------- |
-| **Trạng thái** | Approved                   |
+| **Trạng thái** | Completed                  |
 | **Ngày tạo**   | 31/7/2026                  |
 | **Hệ thống**   | KisorDoc - Word Automation |
 | **Module**     | Template Migration         |
@@ -274,3 +274,4 @@ python migrate_text_to_placeholders.py \
 | 1.1           | 06/8/2026 | KisorDoc AI | Bổ sung quy tắc giải quyết trùng lặp, Idempotent, timestamp backup, làm rõ nguồn mapping Config. |
 | 1.2           | 06/8/2026 | KisorDoc AI | Sửa rule Config Key/Value, làm rõ phạm vi XML (textbox/SDT best effort), cảnh báo match-dense, đồng bộ AC-07. Trạng thái Approved. |
 | 1.3           | 06/8/2026 | KisorDoc AI | Cập nhật Safe Run Replacement example, Fallback slug algorithm, Report disclaimer, thêm Flowchart và AC-15/AC-16. |
+| 1.4           | 07/8/2026 | KisorDoc AI | Hoàn thành hiện thực hóa script CLI migrate_text_to_placeholders.py, vượt qua 100% unit tests và tích hợp vào KisorDoc v5.0.0. |

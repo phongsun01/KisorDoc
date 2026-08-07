@@ -133,3 +133,56 @@ uvicorn api:app --host 0.0.0.0 --port 8000   # chỉ FastAPI API
        "C:\Users\Desktop\AppData\Local\Programs\Python\Python313\python.exe" -m venv .venv
        ```
 
+---
+
+## 4. Hướng dẫn chạy công cụ tự động tạo placeholder (Migrate Text to Placeholder)
+
+Công cụ `migrate_text_to_placeholders.py` giúp bạn quét đệ quy các file Word mẫu (`.docx`), đối chiếu với một hàng dữ liệu mẫu trong file Excel và tự động chuyển đổi các từ khóa thô thành các placeholder `{{ Key }}` tương ứng.
+
+### Bước 4.1: Cú pháp chạy lệnh cơ bản
+
+Kích hoạt môi trường ảo `.venv` và thực hiện gọi lệnh sau:
+
+```bash
+python migrate_text_to_placeholders.py \
+  --excel "đường_dẫn_file_excel.xlsx" \
+  --row <index_dòng_mẫu> \
+  --docx-dir "thư_mục_chứa_word"
+```
+* **`--excel`**: Đường dẫn file Excel chứa dữ liệu mẫu.
+* **`--row`**: Vị trí dòng dữ liệu mẫu làm mẫu để thay (1-based index, ví dụ `--row 1` là dòng dữ liệu đầu tiên ngay dưới tiêu đề cột).
+* **`--docx-dir`**: Thư mục chứa các tệp tin Word cần quét và chuyển đổi.
+
+### Bước 4.2: Các tham số nâng cao
+
+* **`--dry-run`**: Thực hiện chạy thử nghiệm. Script sẽ mô phỏng việc thay thế và xuất báo cáo preview mà không ghi đè bất kỳ file Word thật nào.
+* **`--report-dir <path>`**: Chỉ định thư mục xuất báo cáo kiểm tra (bao gồm file HTML và file Excel). Mặc định là thư mục `reports/`.
+* **`--config-sheet <tên>`**: Chỉ định tên sheet cấu hình mapping của KisorDoc. Mặc định tự tìm sheet mang tên `Config`.
+* **`--case-insensitive`**: So khớp không phân biệt hoa thường khi tìm kiếm văn bản trong Word.
+* **`--min-length <N>`**: Bỏ qua các giá trị mẫu ngắn hơn N ký tự (mặc định: `3`).
+* **`--dense-threshold <N>`**: Ngưỡng cảnh báo nếu một từ khóa xuất hiện quá nhiều lần trong 1 file (mặc định: `15`).
+* **`--include "<pattern>"` / `--exclude "<pattern>"`**: Lọc các file docx qua glob pattern (VD: `--exclude "*nhap*"`).
+
+### Bước 4.3: Ví dụ thực tế
+
+1. **Chạy nháp kiểm tra (Khuyên dùng trước khi làm thật):**
+   ```bash
+   python migrate_text_to_placeholders.py \
+     --excel "D:\Antigravity\1. Thanh toan nho\1. Data\data.xlsx" \
+     --row 1 \
+     --docx-dir "D:\Antigravity\1. Thanh toan nho\2. Templates" \
+     --dry-run \
+     --case-insensitive \
+     --report-dir "reports/"
+   ```
+   *Mở báo cáo dạng HTML `reports/dryrun_YYYYMMDD_HHMMSS.html` trên trình duyệt để kiểm tra trực quan các từ khóa được highlight Đỏ/Xanh trước khi chạy thật.*
+
+2. **Chạy chuyển đổi chính thức:**
+   ```bash
+   python migrate_text_to_placeholders.py \
+     --excel "D:\Antigravity\1. Thanh toan nho\1. Data\data.xlsx" \
+     --row 1 \
+     --docx-dir "D:\Antigravity\1. Thanh toan nho\2. Templates" \
+     --case-insensitive
+   ```
+   *Hệ thống sẽ tự động tạo file backup dạng `*.bak.docx` kèm theo mã thời gian (timestamp) trước khi thực hiện ghi đè dữ liệu.*
