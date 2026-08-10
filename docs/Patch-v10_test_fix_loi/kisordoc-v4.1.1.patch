@@ -1,0 +1,1280 @@
+diff --git a/app.py b/app.py
+index 39a3430..5490f9a 100644
+--- a/app.py
++++ b/app.py
+@@ -226,7 +226,7 @@ def create_ui():
+                     sql = f'SELECT * FROM "{ls}"' if ls else resolve_sheet_query(sheet)
+                     opt_code = opt.split(":")[0].strip() if ":" in opt else opt.strip()
+                     try:
+-                        wf_rows = service.ds.query(f"SELECT DISTINCT Name FROM Workflow WHERE Option = '{opt_code}'")
++                        wf_rows = service.ds.query("SELECT DISTINCT Name FROM Workflow WHERE Option = ?", (opt_code,))
+                         group_choices = [str(r["Name"]).strip() for r in wf_rows if r.get("Name")]
+                     except Exception:
+                         group_choices = ui_labels.get("repeat_group_choices", [])
+diff --git a/kisorlib/batch.py b/kisorlib/batch.py
+index 7738330..4c58adc 100644
+--- a/kisorlib/batch.py
++++ b/kisorlib/batch.py
+@@ -97,6 +97,8 @@ class IncrementalRunLogger:
+             if file_result.warnings:
+                 warn_msg = "; ".join(file_result.warnings)
+                 results.append(f"⚠️ {name} → {display_name}\n   → {warn_msg}")
++                # FIX LOG-01: file warning vẫn là thành công → tăng cả ok_count lẫn warning_count
++                self.ok_count += 1
+                 self.warning_count += 1
+                 self.log_event("⚠️", f"{name} → {display_name}", warn_msg)
+             else:
+@@ -121,7 +123,10 @@ class IncrementalRunLogger:
+         self.log_event("✅", f"{name} → {display_name}")
+ 
+     def record_ok_with_warning(self, results, name, display_name, warn_msg):
++        # FIX LOG-01 compat: file có warning vẫn là thành công → tăng ok_count lẫn warning_count
++        # (Dùng record_result(FileResult) thay hàm này cho code mới)
+         results.append(f"⚠️ {name} → {display_name}\n   → {warn_msg}")
++        self.ok_count += 1
+         self.warning_count += 1
+         self.log_event("⚠️", f"{name} → {display_name}", warn_msg)
+ 
+@@ -279,8 +284,8 @@ async def _run_batch_repeat(
+                 tables_rows    = tables_rows,
+                 danh_muc_file  = danh_muc_file,
+                 key_id         = left_key,
+-                max_retries    = 3,
+-                retry_delay    = 2.0,
++                max_retries    = getattr(config, "FileMaxRetries", 3),   # FIX CFG-01
++                retry_delay    = getattr(config, "FileRetryDelay", 2.0), # FIX CFG-01
+                 on_progress    = on_progress_cb,
+             )
+ 
+@@ -391,9 +396,10 @@ async def _run_batch_normal(
+                     _sh.copy2(str(src), str(dst))
+                     copied.append(dst)
+                     names_actual.append(tn)
+-                except Exception:
+-                    copied.append(dst)
+-                    names_actual.append(tn)
++                except Exception as _copy_err:
++                    # FIX BAT-01: copy thất bại → KHÔNG append dst vào copied
++                    # để tránh generate_one nhận file không tồn tại
++                    print(f"⚠️ Bỏ qua '{tn}' (retry copy thất bại): {_copy_err}")
+         template_names = names_actual
+     else:
+         clear_output_folder(config)
+@@ -426,8 +432,8 @@ async def _run_batch_normal(
+         key_id                  = left_key,
+         table_placeholder_names = table_placeholder_names,
+         dry_run                 = False,
+-        max_retries             = 3,
+-        retry_delay             = 2.0,
++        max_retries             = getattr(config, "FileMaxRetries", 3),   # FIX CFG-01
++        retry_delay             = getattr(config, "FileRetryDelay", 2.0), # FIX CFG-01
+         on_progress             = None,  # chúng ta yield từng file bên dưới
+     )
+ 
+diff --git a/kisorlib/engine.py b/kisorlib/engine.py
+index 07b8962..6248257 100644
+--- a/kisorlib/engine.py
++++ b/kisorlib/engine.py
+@@ -135,7 +135,9 @@ def _build_context_for_request(ds, req: GenerateRequest, cfg, cb: ProgressCallba
+     from .generator import build_context
+     from .utils import _parse_repeat_key_id, resolve_sheet_query
+ 
+-    opt_config = KisorService(cfg, ds).get_option_config(req.option)
++    # FIX ENG-01: khởi tạo KisorService 1 lần duy nhất (tránh query Options 2 lần)
++    svc        = KisorService(cfg, ds)
++    opt_config = svc.get_option_config(req.option)
+     sheet      = opt_config.get("sheet", "GoiThau")
+     key_id     = opt_config.get("key_id", "ID")
+     left_key, _ = _parse_repeat_key_id(key_id)
+@@ -157,7 +159,6 @@ def _build_context_for_request(ds, req: GenerateRequest, cfg, cb: ProgressCallba
+         return None, None, key_id, left_key
+ 
+     # Config rows — hỗ trợ config_row_range
+-    svc = KisorService(cfg, ds)
+     if req.config_row_range:
+         m = _re.match(r"^(\d+)-(\d+)$", req.config_row_range.strip())
+         if m:
+@@ -291,8 +292,8 @@ def generate_documents(
+         key_id                  = left_key,
+         table_placeholder_names = table_placeholder_names,
+         dry_run                 = request.dry_run,
+-        max_retries             = 3,
+-        retry_delay             = 2.0,
++        max_retries             = getattr(cfg, "FileMaxRetries", 3),   # FIX CFG-01
++        retry_delay             = getattr(cfg, "FileRetryDelay", 2.0), # FIX CFG-01
+         on_progress             = _engine_progress,
+     )
+ 
+diff --git a/kisorlib/generator.py b/kisorlib/generator.py
+index 8e910df..54b478a 100644
+--- a/kisorlib/generator.py
++++ b/kisorlib/generator.py
+@@ -235,10 +235,13 @@ def generate_one(
+             return result
+ 
+         # 1. Copy template → output (với retry)
+-        def do_copy():
+-            shutil.copy2(str(template_path), str(output_path))
+-        write_with_retry(do_copy, max_retries=max_retries, delay=retry_delay,
+-                         on_retry=on_progress)
++        # FIX GEN-01: bỏ qua copy khi src == dst (batch đã copy vào output_dir trước)
++        # tránh shutil.SameFileError trên Windows (subclass OSError, không phải PermissionError)
++        if template_path.resolve() != output_path.resolve():
++            def do_copy():
++                shutil.copy2(str(template_path), str(output_path))
++            write_with_retry(do_copy, max_retries=max_retries, delay=retry_delay,
++                             on_retry=on_progress)
+         _emit(on_progress, "info", f"[1/3] Copy: {template_name}", template=template_name)
+ 
+         # 2. Detect missing placeholders (trước merge để output warning)
+@@ -345,8 +348,12 @@ def generate_many(
+               f"[{step}/{total}] {tpl_name}",
+               step=step, total=total, template=tpl_name)
+ 
+-        # Output path = cùng thư mục với src (output_path đã được batch/engine copy vào)
+-        out_path = src_path  # src_path đã là file trong output folder sau copy_templates_to_output
++        # FIX GEN-01: src_path đã là file trong output folder (copy bởi batch/engine).
++        # generate_one cần (template_path, output_path) khác nhau để tránh
++        # shutil.copy2(same, same) → SameFileError trên Windows.
++        # → Template nguồn = src_path (trong output_dir), output = cùng path.
++        # generate_one sẽ bỏ qua bước copy nội bộ khi src == dst.
++        out_path = src_path  # src đã ở output_dir; generate_one merge in-place
+ 
+         result = generate_one(
+             template_path           = src_path,
+diff --git a/kisorlib/service.py b/kisorlib/service.py
+index c7bffc1..6e26a00 100644
+--- a/kisorlib/service.py
++++ b/kisorlib/service.py
+@@ -272,14 +272,19 @@ class KisorService:
+             print(f"⚠️ get_repeat_members: không có right_sheet trong option '{option_key}'")
+             return []
+ 
++        # FIX SVC-01: tên bảng _Goc phải qua _safe_table_name để khớp với tên
++        # mà DataSet._load() đã register (sheet có space/ký tự đặc biệt sẽ bị đổi)
++        from .dataset import _safe_table_name as _stn
++        goc_table = _stn(right_sheet + "_Goc")
++
+         try:
+             if join_key and goi_thau_id:
+                 try:
+-                    rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc" WHERE "{join_key}" = ?', (goi_thau_id,))
++                    rows = self.ds.query(f'SELECT * FROM "{goc_table}" WHERE "{join_key}" = ?', (goi_thau_id,))
+                 except Exception:
+-                    rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc"')
++                    rows = self.ds.query(f'SELECT * FROM "{goc_table}"')
+             else:
+-                rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc"')
++                rows = self.ds.query(f'SELECT * FROM "{goc_table}"')
+         except Exception as e:
+             print(f"❌ get_repeat_members query error: {e}")
+             return []
+@@ -312,14 +317,18 @@ class KisorService:
+         if "|" in show_format:
+             member_show_format = show_format.split("|", 1)[1].strip()
+ 
++        # FIX SVC-01: tên bảng _Goc phải qua _safe_table_name (nhất quán với DataSet._load)
++        from .dataset import _safe_table_name as _stn
++        goc_table = _stn(right_sheet + "_Goc")
++
+         try:
+             if join_key and goi_thau_id:
+                 try:
+-                    all_rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc" WHERE "{join_key}" = ?', (goi_thau_id,))
++                    all_rows = self.ds.query(f'SELECT * FROM "{goc_table}" WHERE "{join_key}" = ?', (goi_thau_id,))
+                 except Exception:
+-                    all_rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc"')
++                    all_rows = self.ds.query(f'SELECT * FROM "{goc_table}"')
+             else:
+-                all_rows = self.ds.query(f'SELECT * FROM "{right_sheet}_Goc"')
++                all_rows = self.ds.query(f'SELECT * FROM "{goc_table}"')
+         except Exception as e:
+             print(f"❌ register_temporary_tcgttd query error: {e}")
+             return False
+diff --git a/tests/test_batch.py b/tests/test_batch.py
+new file mode 100644
+index 0000000..6f6f5a6
+--- /dev/null
++++ b/tests/test_batch.py
+@@ -0,0 +1,397 @@
++"""
++tests/test_batch.py
++────────────────────
++Unit test cho kisorlib/batch.py.
++
++Bao phủ:
++  - IncrementalRunLogger: counts, record_result, record_ok_with_warning (LOG-01 fix),
++    write_header/footer, log_event
++  - _is_locked_error
++  - _find_danh_muc_file
++  - _make_progress_cb
++  - run_batch: validation guards (option/package rỗng, template rỗng)
++"""
++
++import asyncio
++import tempfile
++from pathlib import Path
++from unittest.mock import AsyncMock, MagicMock, patch
++
++import pytest
++
++from kisorlib.batch import (
++    IncrementalRunLogger,
++    _find_danh_muc_file,
++    _is_locked_error,
++    _make_progress_cb,
++    run_batch,
++)
++from kisorlib.generator import FileResult
++
++
++# ── fixture ───────────────────────────────────────────────────────────────────
++
++@pytest.fixture()
++def logger(tmp_path):
++    cfg = MagicMock()
++    cfg.ProjectPath = str(tmp_path)
++    return IncrementalRunLogger(cfg, "GT001", "OptA", "run")
++
++
++# ══════════════════════════════════════════════
++# _is_locked_error
++# ══════════════════════════════════════════════
++
++class TestIsLockedError:
++    @pytest.mark.parametrize("msg,expected", [
++        ("File đang mở trong Word",                True),
++        ("file bị khóa bởi process",              True),
++        ("PermissionError: access denied",         True),
++        ("being used by another process",          True),
++        ("RuntimeError: jinja parse fail",         False),
++        ("FileNotFoundError: no such file",        False),
++        ("SameFileError: src and dst are same",    False),
++        ("",                                       False),
++    ])
++    def test_cases(self, msg, expected):
++        assert _is_locked_error(msg) == expected
++
++
++# ══════════════════════════════════════════════
++# _find_danh_muc_file
++# ══════════════════════════════════════════════
++
++class TestFindDanhMucFile:
++
++    def _cfg(self, tmp_path, danh_muc_file="DataFile"):
++        cfg = MagicMock()
++        cfg.data_path = tmp_path
++        cfg.DanhMucFile = danh_muc_file
++        return cfg
++
++    def test_returns_matching_file(self, tmp_path):
++        (tmp_path / "DataFile_2024.xlsx").touch()
++        (tmp_path / "Other.xlsx").touch()
++        result = _find_danh_muc_file(self._cfg(tmp_path))
++        assert result is not None
++        assert "DataFile" in result.name
++
++    def test_case_insensitive_match(self, tmp_path):
++        (tmp_path / "DATAFILE_v2.xlsx").touch()
++        result = _find_danh_muc_file(self._cfg(tmp_path, "datafile"))
++        assert result is not None
++
++    def test_fallback_to_first_xlsx_when_no_match(self, tmp_path):
++        (tmp_path / "AAA.xlsx").touch()
++        (tmp_path / "ZZZ.xlsx").touch()
++        result = _find_danh_muc_file(self._cfg(tmp_path, "NoMatch"))
++        assert result is not None
++        assert result.name == "AAA.xlsx"  # sorted → alphabetically first
++
++    def test_returns_none_when_no_xlsx(self, tmp_path):
++        result = _find_danh_muc_file(self._cfg(tmp_path))
++        assert result is None
++
++    def test_ignores_non_xlsx_files(self, tmp_path):
++        (tmp_path / "data.csv").touch()
++        (tmp_path / "data.xls").touch()
++        result = _find_danh_muc_file(self._cfg(tmp_path))
++        assert result is None
++
++
++# ══════════════════════════════════════════════
++# _make_progress_cb
++# ══════════════════════════════════════════════
++
++class TestMakeProgressCb:
++
++    def test_calls_progress_with_fraction(self):
++        calls = []
++        cb = _make_progress_cb(lambda frac, msg: calls.append((frac, msg)), 0, 4, "lbl")
++        cb({"level": "info", "message": "hello"})
++        assert len(calls) == 1
++        assert calls[0][0] == pytest.approx(1 / 4)
++
++    def test_fraction_calculation(self):
++        calls = []
++        cb = _make_progress_cb(lambda f, m: calls.append(f), 2, 5, "lbl")
++        cb({"level": "success", "message": "ok"})
++        assert calls[0] == pytest.approx(3 / 5)
++
++    def test_none_progress_cb_no_error(self):
++        cb = _make_progress_cb(None, 0, 1, "lbl")
++        cb({"level": "info", "message": "test"})  # không raise
++
++    def test_ignores_non_standard_levels(self):
++        calls = []
++        cb = _make_progress_cb(lambda f, m: calls.append(m), 0, 1, "lbl")
++        # level không phải info/warning/error/success thì không gọi progress_cb
++        cb({"level": "debug", "message": "debug msg"})
++        assert calls == []
++
++    def test_all_visible_levels_trigger(self):
++        calls = []
++        cb = _make_progress_cb(lambda f, m: calls.append(m), 0, 4, "lbl")
++        for level in ("info", "warning", "error", "success"):
++            cb({"level": level, "message": f"msg-{level}"})
++        assert len(calls) == 4
++
++
++# ══════════════════════════════════════════════
++# IncrementalRunLogger
++# ══════════════════════════════════════════════
++
++class TestIncrementalRunLogger:
++
++    # ── khởi tạo ──
++
++    def test_creates_log_file(self, logger, tmp_path):
++        assert logger.filepath.exists()
++
++    def test_initial_counts_zero(self, logger):
++        assert logger.ok_count == 0
++        assert logger.warning_count == 0
++        assert logger.error_count == 0
++
++    def test_mode_stored(self, tmp_path):
++        cfg = MagicMock(); cfg.ProjectPath = str(tmp_path)
++        lg = IncrementalRunLogger(cfg, "GT001", "Opt", "retry")
++        assert lg.mode == "retry"
++
++    # ── write_header / write_footer ──
++
++    def test_write_header_no_crash(self, logger):
++        logger.write_header("Option A", "Gói thầu 001", 10)
++        content = logger.filepath.read_text(encoding="utf-8-sig")
++        assert "Option A" in content
++        assert "Gói thầu 001" in content
++
++    def test_write_footer_closes_file(self, logger):
++        logger.write_header("Opt", "Pkg", 5)
++        logger.write_footer()
++        assert logger._fh.closed
++
++    def test_write_footer_records_elapsed(self, logger):
++        logger.write_header("Opt", "Pkg", 5)
++        logger.write_footer()
++        content = logger.filepath.read_text(encoding="utf-8-sig")
++        assert "Thời gian chạy" in content
++
++    # ── log_event ──
++
++    def test_log_event_writes_to_file(self, logger):
++        logger.log_event("✅", "Template A", "extra info")
++        content = logger.filepath.read_text(encoding="utf-8-sig")
++        assert "Template A" in content
++        assert "extra info" in content
++
++    def test_log_event_no_extra(self, logger):
++        logger.log_event("❌", "Template B")
++        content = logger.filepath.read_text(encoding="utf-8-sig")
++        assert "Template B" in content
++
++    # ── record_result: success branches ──
++
++    def test_record_result_success_increments_ok(self, logger):
++        fr = FileResult("Tpl", success=True, output_path="/out/Tpl.docx")
++        logger.record_result([], fr, "Tpl.docx")
++        assert logger.ok_count == 1
++        assert logger.warning_count == 0
++        assert logger.error_count == 0
++
++    def test_record_result_success_appends_checkmark(self, logger):
++        results = []
++        fr = FileResult("Tpl", success=True, output_path="/out/Tpl.docx")
++        logger.record_result(results, fr, "Tpl.docx")
++        assert results[0].startswith("✅")
++        assert "Tpl.docx" in results[0]
++
++    # ── LOG-01 fix: warning branch tăng cả ok_count lẫn warning_count ──
++
++    def test_record_result_warning_increments_both_ok_and_warning(self, logger):
++        """FIX LOG-01: file có warning vẫn là thành công → ok_count + warning_count cùng tăng."""
++        fr = FileResult("Tpl", success=True, output_path="/out/Tpl.docx",
++                        warnings=["Placeholder X không có data"])
++        logger.record_result([], fr, "Tpl.docx")
++        assert logger.ok_count == 1,      "ok_count phải tăng (file vẫn thành công)"
++        assert logger.warning_count == 1, "warning_count phải tăng"
++        assert logger.error_count == 0
++
++    def test_record_result_warning_appends_warning_icon(self, logger):
++        results = []
++        fr = FileResult("Tpl", success=True, output_path="/out/Tpl.docx",
++                        warnings=["Missing X", "Missing Y"])
++        logger.record_result(results, fr, "Tpl.docx")
++        assert results[0].startswith("⚠️")
++        assert "Missing X" in results[0]
++
++    def test_record_result_multiple_warnings_joined(self, logger):
++        results = []
++        fr = FileResult("Tpl", success=True, output_path="/out/Tpl.docx",
++                        warnings=["W1", "W2"])
++        logger.record_result(results, fr, "Tpl.docx")
++        assert "W1" in results[0] and "W2" in results[0]
++
++    # ── record_result: error branches ──
++
++    def test_record_result_locked_error(self, logger):
++        results = []
++        fr = FileResult("Tpl", success=False, error="File đang mở trong Word")
++        logger.record_result(results, fr, "Tpl.docx")
++        assert logger.error_count == 1
++        assert logger.ok_count == 0
++        assert results[0].startswith("🔒")
++
++    def test_record_result_other_error(self, logger):
++        results = []
++        fr = FileResult("Tpl", success=False, error="RuntimeError: jinja crash")
++        logger.record_result(results, fr, "Tpl.docx")
++        assert logger.error_count == 1
++        assert results[0].startswith("❌")
++
++    def test_record_result_none_error_message(self, logger):
++        results = []
++        fr = FileResult("Tpl", success=False, error=None)
++        logger.record_result(results, fr, "Tpl.docx")
++        assert logger.error_count == 1
++
++    # ── Nhiều file: tổng counts nhất quán ──
++
++    def test_multiple_files_count_summary(self, logger):
++        """ok + warning + ok → ok_count=3, warning_count=1, error_count=0."""
++        results = []
++        logger.record_result(results,
++            FileResult("T1", success=True, output_path="/o/T1.docx"), "T1.docx")
++        logger.record_result(results,
++            FileResult("T2", success=True, output_path="/o/T2.docx",
++                       warnings=["W"]), "T2.docx")
++        logger.record_result(results,
++            FileResult("T3", success=True, output_path="/o/T3.docx"), "T3.docx")
++        assert logger.ok_count == 3
++        assert logger.warning_count == 1
++        assert logger.error_count == 0
++
++    def test_mixed_results_count(self, logger):
++        """ok + warning + locked + other_error."""
++        results = []
++        logger.record_result(results, FileResult("T1", success=True,
++            output_path="/o/T1.docx"), "T1.docx")
++        logger.record_result(results, FileResult("T2", success=True,
++            output_path="/o/T2.docx", warnings=["W"]), "T2.docx")
++        logger.record_result(results, FileResult("T3", success=False,
++            error="File đang mở trong Word"), "T3.docx")
++        logger.record_result(results, FileResult("T4", success=False,
++            error="RuntimeError"), "T4.docx")
++        assert logger.ok_count == 2
++        assert logger.warning_count == 1
++        assert logger.error_count == 2
++
++    # ── record_ok_with_warning (LOG-01 compat fix) ──
++
++    def test_record_ok_with_warning_increments_both(self, logger):
++        """Backward-compat: record_ok_with_warning cũng phải tăng ok_count (LOG-01 fix)."""
++        results = []
++        logger.record_ok_with_warning(results, "Tpl", "Tpl.docx", "warn msg")
++        assert logger.ok_count == 1,      "ok_count phải tăng (LOG-01 fix)"
++        assert logger.warning_count == 1
++        assert logger.error_count == 0
++
++    def test_record_ok_with_warning_appends_warning_icon(self, logger):
++        results = []
++        logger.record_ok_with_warning(results, "Tpl", "Tpl.docx", "placeholder missing")
++        assert results[0].startswith("⚠️")
++        assert "placeholder missing" in results[0]
++
++    # ── record_ok (compat) ──
++
++    def test_record_ok_increments_ok(self, logger):
++        results = []
++        logger.record_ok(results, "Tpl", "Tpl.docx")
++        assert logger.ok_count == 1
++        assert results[0].startswith("✅")
++
++    # ── record_locked ──
++
++    def test_record_locked_sets_flag(self, logger):
++        results = []
++        has_locked = [False]
++        failed = []
++        logger.record_locked(results, "Tpl", has_locked, failed)
++        assert has_locked[0] is True
++        assert "Tpl" in failed
++        assert logger.error_count == 1
++        assert results[0].startswith("🔒")
++
++    # ── record_error ──
++
++    def test_record_error_sets_flag(self, logger):
++        results = []
++        has_other = [False]
++        failed = []
++        logger.record_error(results, "Tpl", RuntimeError("oops"), has_other, failed)
++        assert has_other[0] is True
++        assert "Tpl" in failed
++        assert logger.error_count == 1
++        assert results[0].startswith("❌")
++
++
++# ══════════════════════════════════════════════
++# run_batch: validation guards
++# ══════════════════════════════════════════════
++
++def _collect_async(gen):
++    """Thu thập tất cả item từ async generator."""
++    results = []
++    async def _run():
++        async for item in gen:
++            results.append(item)
++    asyncio.run(_run())
++    return results
++
++
++class TestRunBatchValidation:
++    """
++    Chỉ test validation guards (option/package/template rỗng).
++    Không cần KisorService thật hay file Excel.
++    """
++
++    def _service(self):
++        svc = MagicMock()
++        svc.config = MagicMock()
++        svc.ds = MagicMock()
++        return svc
++
++    def test_empty_option_yields_warning(self):
++        items = _collect_async(run_batch(self._service(), "", "Gói thầu A", ["T1"]))
++        _, status, _ = items[-1]
++        assert "quy trình" in status.lower() or "option" in status.lower()
++
++    def test_blank_option_yields_warning(self):
++        items = _collect_async(run_batch(self._service(), "   ", "Gói thầu A", ["T1"]))
++        _, status, _ = items[-1]
++        assert "⚠️" in status
++
++    def test_empty_package_yields_warning(self):
++        items = _collect_async(run_batch(self._service(), "OptA", "", ["T1"]))
++        _, status, _ = items[-1]
++        assert "gói thầu" in status.lower() or "⚠️" in status
++
++    def test_blank_package_yields_warning(self):
++        items = _collect_async(run_batch(self._service(), "OptA", "   ", ["T1"]))
++        _, status, _ = items[-1]
++        assert "⚠️" in status
++
++    def test_empty_templates_yields_warning(self):
++        items = _collect_async(run_batch(self._service(), "OptA", "Gói thầu A", []))
++        _, status, _ = items[-1]
++        assert "template" in status.lower() or "⚠️" in status
++
++    def test_validation_yields_exactly_one_item(self):
++        """Guard nên yield đúng 1 item rồi return."""
++        items = _collect_async(run_batch(self._service(), "", "pkg", ["T"]))
++        assert len(items) == 1
++
++    def test_validation_third_element_is_none(self):
++        """retry_state_data phải là None khi validation fail."""
++        items = _collect_async(run_batch(self._service(), "", "pkg", ["T"]))
++        assert items[0][2] is None
+diff --git a/tests/test_merger.py b/tests/test_merger.py
+new file mode 100644
+index 0000000..06d52ef
+--- /dev/null
++++ b/tests/test_merger.py
+@@ -0,0 +1,245 @@
++"""
++tests/test_merger.py
++─────────────────────
++Unit test cho kisorlib/merger.py.
++
++Bao phủ:
++  - mail_merge_safe: happy path, DebugUndefined, lỗi template, lỗi output dir,
++    filters, tmp cleanup, context defaults
++  - mail_merge: cùng logic, trực tiếp ghi output_path
++"""
++
++import shutil
++import tempfile
++from pathlib import Path
++
++import pytest
++from docx import Document
++
++
++# ── helpers ──────────────────────────────────────────────────────────────────
++
++def _make_docx(path: Path, text: str) -> Path:
++    """Tạo .docx tối giản với 1 đoạn văn bản (có thể chứa Jinja2 placeholder)."""
++    doc = Document()
++    doc.add_paragraph(text)
++    doc.save(str(path))
++    return path
++
++
++def _read_docx(path: Path) -> str:
++    """Đọc nội dung text của tất cả paragraph trong .docx."""
++    doc = Document(str(path))
++    return "\n".join(p.text for p in doc.paragraphs)
++
++
++@pytest.fixture()
++def tmp(tmp_path):
++    return tmp_path
++
++
++# ══════════════════════════════════════════════
++# mail_merge_safe
++# ══════════════════════════════════════════════
++
++class TestMailMergeSafe:
++    from kisorlib.merger import mail_merge_safe  # import một lần
++
++    def setup_method(self):
++        from kisorlib.merger import mail_merge_safe
++        self.merge = mail_merge_safe
++
++    # ── Happy path ──
++
++    def test_basic_substitution(self, tmp):
++        tpl = _make_docx(tmp / "tpl.docx", "Xin chào {{Name}}!")
++        out = tmp / "out.docx"
++        ok, err = self.merge(tpl, {"Name": "Thế giới"}, out)
++        assert ok is True
++        assert err == ""
++        assert out.exists()
++        content = _read_docx(out)
++        assert "Thế giới" in content
++
++    def test_multiple_placeholders(self, tmp):
++        tpl = _make_docx(tmp / "tpl.docx", "{{A}} và {{B}}")
++        out = tmp / "out.docx"
++        ok, err = self.merge(tpl, {"A": "alpha", "B": "beta"}, out)
++        assert ok
++        content = _read_docx(out)
++        assert "alpha" in content
++        assert "beta" in content
++
++    def test_returns_true_empty_error_on_success(self, tmp):
++        tpl = _make_docx(tmp / "tpl.docx", "{{X}}")
++        out = tmp / "out.docx"
++        ok, err = self.merge(tpl, {"X": "val"}, out)
++        assert ok is True
++        assert err == ""
++
++    # ── DebugUndefined: placeholder không có trong context → giữ nguyên, không crash ──
++
++    def test_missing_placeholder_preserved(self, tmp):
++        tpl = _make_docx(tmp / "tpl.docx", "{{Known}} và {{Unknown}}")
++        out = tmp / "out.docx"
++        ok, err = self.merge(tpl, {"Known": "có"}, out)
++        assert ok is True  # không crash
++        assert out.exists()
++
++    def test_all_missing_placeholders_ok(self, tmp):
++        tpl = _make_docx(tmp / "tpl.docx", "{{A}} {{B}} {{C}}")
++        out = tmp / "out.docx"
++        ok, err = self.merge(tpl, {}, out)
++        assert ok is True
++
++    # ── Context defaults ──
++
++    def test_now_added_to_context_automatically(self, tmp):
++        """mail_merge_safe tự inject 'now' nếu không có trong context."""
++        from datetime import datetime
++        tpl = _make_docx(tmp / "tpl.docx", "{{now}}")
++        out = tmp / "out.docx"
++        ok, err = self.merge(tpl, {}, out)
++        assert ok is True  # 'now' được inject → không undefined
++
++    def test_caller_now_not_overridden(self, tmp):
++        """Nếu caller cung cấp 'now' thì dùng giá trị đó."""
++        from datetime import datetime
++        custom_now = datetime(2024, 1, 15, 12, 0, 0)
++        tpl = _make_docx(tmp / "tpl.docx", "{{now|date}}")
++        out = tmp / "out.docx"
++        ok, _ = self.merge(tpl, {"now": custom_now}, out)
++        assert ok is True
++
++    # ── Lỗi: template không tồn tại ──
++
++    def test_missing_template_returns_false(self, tmp):
++        out = tmp / "out.docx"
++        ok, err = self.merge(tmp / "nonexistent.docx", {}, out)
++        assert ok is False
++        assert err != ""
++        assert not out.exists()
++
++    # ── Lỗi: output directory không tồn tại ──
++
++    def test_missing_output_dir_returns_false(self, tmp):
++        tpl = _make_docx(tmp / "tpl.docx", "{{X}}")
++        out = tmp / "subdir_missing" / "out.docx"
++        ok, err = self.merge(tpl, {"X": "v"}, out)
++        assert ok is False
++        assert err != ""
++
++    # ── Tmp file cleanup ──
++
++    def test_no_tmp_leftover_on_success(self, tmp):
++        tpl = _make_docx(tmp / "tpl.docx", "{{X}}")
++        out = tmp / "out.docx"
++        before = set(tmp.iterdir())
++        self.merge(tpl, {"X": "val"}, out)
++        after = set(tmp.iterdir())
++        new_files = after - before
++        tmp_leftovers = [f for f in new_files if f.name != "out.docx"]
++        assert tmp_leftovers == [], f"Tmp files not cleaned: {tmp_leftovers}"
++
++    def test_no_tmp_leftover_on_error(self, tmp):
++        out = tmp / "out.docx"
++        before = set(tmp.iterdir())
++        self.merge(tmp / "missing.docx", {}, out)  # sẽ fail
++        after = set(tmp.iterdir())
++        new_files = after - before
++        assert not any(f.suffix == ".docx" for f in new_files), \
++            f"Leftover files after error: {new_files}"
++
++    # ── Output file integrity ──
++
++    def test_output_is_valid_docx(self, tmp):
++        tpl = _make_docx(tmp / "tpl.docx", "{{Name}}")
++        out = tmp / "out.docx"
++        self.merge(tpl, {"Name": "Test"}, out)
++        # Document() sẽ raise nếu file corrupt
++        doc = Document(str(out))
++        assert doc is not None
++
++    def test_output_not_created_on_failure(self, tmp):
++        out = tmp / "out.docx"
++        self.merge(tmp / "missing.docx", {}, out)
++        assert not out.exists()
++
++    # ── Filters hoạt động qua mail_merge_safe ──
++
++    def test_date_filter(self, tmp):
++        tpl = _make_docx(tmp / "tpl.docx", "{{NgayKy|date}}")
++        out = tmp / "out.docx"
++        ok, err = self.merge(tpl, {"NgayKy": "15/03/2024"}, out)
++        assert ok is True, f"err: {err}"
++
++    def test_number_filter(self, tmp):
++        tpl = _make_docx(tmp / "tpl.docx", "{{GiaTriHopDong|number}}")
++        out = tmp / "out.docx"
++        ok, err = self.merge(tpl, {"GiaTriHopDong": "1500000000"}, out)
++        assert ok is True, f"err: {err}"
++
++    def test_upper_filter(self, tmp):
++        tpl = _make_docx(tmp / "tpl.docx", "{{Name|upper}}")
++        out = tmp / "out.docx"
++        ok, err = self.merge(tpl, {"Name": "hello"}, out)
++        assert ok is True
++
++    # ── Overwrite existing output ──
++
++    def test_overwrites_existing_output(self, tmp):
++        tpl = _make_docx(tmp / "tpl.docx", "{{Name}}")
++        out = tmp / "out.docx"
++        self.merge(tpl, {"Name": "First"}, out)
++        self.merge(tpl, {"Name": "Second"}, out)
++        content = _read_docx(out)
++        assert "Second" in content
++
++    # ── Path types: str và Path đều hoạt động ──
++
++    def test_accepts_string_paths(self, tmp):
++        tpl = _make_docx(tmp / "tpl.docx", "{{X}}")
++        out = tmp / "out.docx"
++        ok, err = self.merge(str(tpl), {"X": "v"}, str(out))
++        assert ok is True
++
++    def test_accepts_path_objects(self, tmp):
++        tpl = _make_docx(tmp / "tpl.docx", "{{X}}")
++        out = tmp / "out.docx"
++        ok, err = self.merge(tpl, {"X": "v"}, out)
++        assert ok is True
++
++
++# ══════════════════════════════════════════════
++# mail_merge (không có error handling)
++# ══════════════════════════════════════════════
++
++class TestMailMerge:
++
++    def setup_method(self):
++        from kisorlib.merger import mail_merge
++        self.merge = mail_merge
++
++    def test_basic_substitution(self, tmp):
++        tpl = _make_docx(tmp / "tpl.docx", "Hello {{Name}}!")
++        out = tmp / "out.docx"
++        self.merge(tpl, {"Name": "World"}, out)
++        assert out.exists()
++        content = _read_docx(out)
++        assert "World" in content
++
++    def test_raises_on_missing_template(self, tmp):
++        with pytest.raises(Exception):
++            self.merge(tmp / "missing.docx", {}, tmp / "out.docx")
++
++    def test_now_injected(self, tmp):
++        tpl = _make_docx(tmp / "tpl.docx", "{{now}}")
++        out = tmp / "out.docx"
++        self.merge(tpl, {}, out)  # không raise
++        assert out.exists()
++
++    def test_missing_placeholder_does_not_raise(self, tmp):
++        tpl = _make_docx(tmp / "tpl.docx", "{{Known}} {{Unknown}}")
++        out = tmp / "out.docx"
++        self.merge(tpl, {"Known": "ok"}, out)  # DebugUndefined → không crash
++        assert out.exists()
+diff --git a/tests/test_sql_join.py b/tests/test_sql_join.py
+new file mode 100644
+index 0000000..e9a6d66
+--- /dev/null
++++ b/tests/test_sql_join.py
+@@ -0,0 +1,427 @@
++"""
++tests/test_sql_join.py
++────────────────────────
++Unit test cho kisorlib/sql_join.py (Refactor v3.2 Phase B).
++
++Bao phủ:
++  - validate_sql_identifier
++  - parse_join_expression (tất cả operators + edge cases)
++  - resolve_sheet_query   (router chính — 0 test trước đây)
++  - _parse_repeat_sheet_config
++"""
++
++import pytest
++
++from kisorlib.sql_join import (
++    _JOIN_RE,
++    _OP_MAP,
++    _parse_repeat_sheet_config,
++    parse_join_expression,
++    resolve_sheet_query,
++    validate_sql_identifier,
++)
++
++
++# ══════════════════════════════════════════════
++# validate_sql_identifier
++# ══════════════════════════════════════════════
++
++class TestValidateSqlIdentifier:
++    def test_ascii_plain(self):
++        assert validate_sql_identifier("GoiThau") == "GoiThau"
++
++    def test_with_underscore(self):
++        assert validate_sql_identifier("GoiThau_ID") == "GoiThau_ID"
++
++    def test_vietnamese_accented(self):
++        assert validate_sql_identifier("Tổ chuyên gia") == "Tổ chuyên gia"
++        assert validate_sql_identifier("Đấu thầu") == "Đấu thầu"
++        assert validate_sql_identifier("Nhà thầu") == "Nhà thầu"
++
++    def test_space_allowed(self):
++        assert validate_sql_identifier("Số hiệu gói thầu") == "Số hiệu gói thầu"
++
++    def test_hyphen_dot_hash_allowed(self):
++        assert validate_sql_identifier("Member-ID") == "Member-ID"
++        assert validate_sql_identifier("Config.Date") == "Config.Date"
++        assert validate_sql_identifier("#TempTable") == "#TempTable"
++
++    def test_empty_string(self):
++        assert validate_sql_identifier("") == ""
++
++    def test_raises_on_single_quote(self):
++        with pytest.raises(ValueError, match="Cảnh báo bảo mật"):
++            validate_sql_identifier("ID' OR '1'='1")
++
++    def test_raises_on_double_quote(self):
++        with pytest.raises(ValueError, match="Cảnh báo bảo mật"):
++            validate_sql_identifier('ID" OR "1"="1')
++
++    def test_raises_on_semicolon(self):
++        with pytest.raises(ValueError, match="Cảnh báo bảo mật"):
++            validate_sql_identifier("GoiThau; DROP TABLE Options; --")
++
++    def test_raises_on_slash(self):
++        with pytest.raises(ValueError, match="Cảnh báo bảo mật"):
++            validate_sql_identifier("Table/Name")
++
++    def test_raises_on_backslash(self):
++        with pytest.raises(ValueError, match="Cảnh báo bảo mật"):
++            validate_sql_identifier("Table\\Name")
++
++    def test_raises_on_parenthesis(self):
++        with pytest.raises(ValueError, match="Cảnh báo bảo mật"):
++            validate_sql_identifier("func()")
++
++
++# ══════════════════════════════════════════════
++# parse_join_expression
++# ══════════════════════════════════════════════
++
++class TestParseJoinExpression:
++
++    # ── Operator coverage ──
++
++    def test_left_join(self):
++        sql = parse_join_expression("GoiThau <* TCGTTD @ GoiThau_ID")
++        assert "LEFT JOIN" in sql
++        assert '"GoiThau" LEFT JOIN "TCGTTD"' in sql
++        assert '"GoiThau"."GoiThau_ID" = "TCGTTD"."GoiThau_ID"' in sql
++
++    def test_right_join(self):
++        sql = parse_join_expression("GoiThau *> TCGTTD @ GoiThau_ID")
++        assert "RIGHT JOIN" in sql
++        assert '"GoiThau" RIGHT JOIN "TCGTTD"' in sql
++
++    def test_inner_join(self):
++        sql = parse_join_expression("GoiThau * TCGTTD @ GoiThau_ID")
++        assert "INNER JOIN" in sql
++        assert '"GoiThau" INNER JOIN "TCGTTD"' in sql
++
++    def test_full_outer_join(self):
++        sql = parse_join_expression("GoiThau <*> TCGTTD @ GoiThau_ID")
++        assert "FULL OUTER JOIN" in sql
++        assert '"GoiThau" FULL OUTER JOIN "TCGTTD"' in sql
++
++    # ── Operator priority: <*> phải được nhận trước <* ──
++
++    def test_full_outer_not_confused_with_left(self):
++        # <*> phải là FULL OUTER, không phải LEFT
++        sql = parse_join_expression("A <*> B @ k")
++        assert "FULL OUTER JOIN" in sql
++        assert "LEFT JOIN" not in sql
++
++    def test_left_not_confused_with_inner(self):
++        # <* phải là LEFT, không phải INNER *
++        sql = parse_join_expression("A <* B @ k")
++        assert "LEFT JOIN" in sql
++        assert "INNER JOIN" not in sql
++
++    def test_right_not_confused_with_inner(self):
++        # *> phải là RIGHT, không phải INNER *
++        sql = parse_join_expression("A *> B @ k")
++        assert "RIGHT JOIN" in sql
++        assert "INNER JOIN" not in sql
++
++    # ── Key khác tên (@ k1 = k2) ──
++
++    def test_different_key_names_left(self):
++        sql = parse_join_expression("GoiThau <* TCGTTD @ GoiThau_ID = MemberID")
++        assert "LEFT JOIN" in sql
++        assert '"GoiThau"."GoiThau_ID" = "TCGTTD"."MemberID"' in sql
++
++    def test_different_key_names_full_outer(self):
++        sql = parse_join_expression("Table1 <*> Table2 @ GoiThau_ID = MemberID")
++        assert "FULL OUTER JOIN" in sql
++        assert '"Table1"."GoiThau_ID" = "Table2"."MemberID"' in sql
++
++    def test_different_key_names_right(self):
++        sql = parse_join_expression("A *> B @ k1 = k2")
++        assert "RIGHT JOIN" in sql
++        assert '"A"."k1" = "B"."k2"' in sql
++
++    def test_different_key_names_inner(self):
++        sql = parse_join_expression("A * B @ k1 = k2")
++        assert "INNER JOIN" in sql
++        assert '"A"."k1" = "B"."k2"' in sql
++
++    # ── Tên bảng tiếng Việt ──
++
++    def test_vietnamese_table_names(self):
++        sql = parse_join_expression("Gói thầu <* Thành viên @ ID")
++        assert "LEFT JOIN" in sql
++        assert '"Gói thầu"' in sql
++        assert '"Thành viên"' in sql
++
++    def test_vietnamese_right_table_only(self):
++        sql = parse_join_expression("GoiThau <* Nhà thầu @ GoiThau_ID")
++        assert "LEFT JOIN" in sql
++        assert '"Nhà thầu"' in sql
++
++    # ── SELECT passthrough ──
++
++    def test_select_passthrough_uppercase(self):
++        expr = "SELECT * FROM GoiThau"
++        assert parse_join_expression(expr) == expr
++
++    def test_select_passthrough_lowercase(self):
++        expr = "select distinct name from T where x = 1"
++        assert parse_join_expression(expr) == expr
++
++    def test_select_passthrough_with_join(self):
++        expr = "SELECT * FROM A LEFT JOIN B ON A.k = B.k"
++        assert parse_join_expression(expr) == expr
++
++    # ── Không có @ → SELECT đơn ──
++
++    def test_no_at_sign_simple_table(self):
++        assert parse_join_expression("GoiThau") == 'SELECT * FROM "GoiThau"'
++
++    def test_no_at_sign_vietnamese(self):
++        assert parse_join_expression("Đấu thầu") == 'SELECT * FROM "Đấu thầu"'
++
++    # ── Extra whitespace ──
++
++    def test_extra_spaces_around_operator(self):
++        sql = parse_join_expression("  GoiThau  <*  TCGTTD  @  GoiThau_ID  ")
++        assert "LEFT JOIN" in sql
++        assert '"GoiThau"' in sql
++        assert '"TCGTTD"' in sql
++        assert '"GoiThau_ID"' in sql
++
++    # ── Tên bảng có ký tự nguy hiểm → ValueError ──
++
++    def test_raises_on_dangerous_left_table(self):
++        with pytest.raises(ValueError, match="Cảnh báo bảo mật"):
++            parse_join_expression("Table'; DROP TABLE-- <* B @ k")
++
++    def test_raises_on_dangerous_right_table(self):
++        with pytest.raises(ValueError, match="Cảnh báo bảo mật"):
++            parse_join_expression("A <* B'; DROP-- @ k")
++
++    def test_raises_on_dangerous_key(self):
++        with pytest.raises(ValueError, match="Cảnh báo bảo mật"):
++            parse_join_expression("A <* B @ k'; DROP TABLE--")
++
++    # ── SQL output structure ──
++
++    def test_output_starts_with_select(self):
++        sql = parse_join_expression("A <* B @ k")
++        assert sql.strip().upper().startswith("SELECT")
++
++    def test_output_has_on_clause(self):
++        sql = parse_join_expression("A * B @ k")
++        assert " ON " in sql
++
++
++# ══════════════════════════════════════════════
++# resolve_sheet_query  (trước đây 0 test)
++# ══════════════════════════════════════════════
++
++class TestResolveSheetQuery:
++
++    # ── SELECT passthrough ──
++
++    def test_passthrough_select_uppercase(self):
++        expr = "SELECT * FROM GoiThau WHERE ID = 1"
++        assert resolve_sheet_query(expr) == expr
++
++    def test_passthrough_select_lowercase(self):
++        expr = "select distinct name from T"
++        assert resolve_sheet_query(expr) == expr
++
++    def test_passthrough_select_with_subquery(self):
++        expr = "SELECT a, b FROM T1 JOIN T2 ON T1.k = T2.k"
++        assert resolve_sheet_query(expr) == expr
++
++    # ── Simple sheet name → SELECT * FROM ──
++
++    def test_simple_ascii_sheet(self):
++        assert resolve_sheet_query("GoiThau") == 'SELECT * FROM "GoiThau"'
++
++    def test_simple_vietnamese_sheet(self):
++        assert resolve_sheet_query("Đấu thầu") == 'SELECT * FROM "Đấu thầu"'
++
++    def test_simple_sheet_with_space(self):
++        assert resolve_sheet_query("Nhà thầu") == 'SELECT * FROM "Nhà thầu"'
++
++    def test_simple_sheet_underscore(self):
++        assert resolve_sheet_query("GoiThau_ID") == 'SELECT * FROM "GoiThau_ID"'
++
++    # ── Whitespace trimming ──
++
++    def test_leading_trailing_spaces(self):
++        assert resolve_sheet_query("  GoiThau  ") == 'SELECT * FROM "GoiThau"'
++
++    def test_tabs_stripped(self):
++        assert resolve_sheet_query("\tGoiThau\t") == 'SELECT * FROM "GoiThau"'
++
++    # ── Join expressions → parse_join_expression ──
++
++    def test_left_join_routed(self):
++        sql = resolve_sheet_query("GoiThau <* TCGTTD @ GoiThau_ID")
++        assert "LEFT JOIN" in sql
++        assert '"GoiThau"' in sql
++        assert '"TCGTTD"' in sql
++
++    def test_right_join_routed(self):
++        sql = resolve_sheet_query("GoiThau *> TCGTTD @ GoiThau_ID")
++        assert "RIGHT JOIN" in sql
++
++    def test_inner_join_routed(self):
++        sql = resolve_sheet_query("GoiThau * TCGTTD @ GoiThau_ID")
++        assert "INNER JOIN" in sql
++
++    def test_full_outer_join_routed(self):
++        sql = resolve_sheet_query("GoiThau <*> TCGTTD @ GoiThau_ID")
++        assert "FULL OUTER JOIN" in sql
++
++    def test_join_with_different_keys(self):
++        sql = resolve_sheet_query("GoiThau <* TCGTTD @ GoiThau_ID = MemberID")
++        assert "LEFT JOIN" in sql
++        assert '"GoiThau"."GoiThau_ID" = "TCGTTD"."MemberID"' in sql
++
++    def test_join_vietnamese_tables(self):
++        sql = resolve_sheet_query("Gói thầu <* Nhà thầu @ ID")
++        assert "LEFT JOIN" in sql
++        assert '"Gói thầu"' in sql
++        assert '"Nhà thầu"' in sql
++
++    # ── _JOIN_RE không match: không có @ hoặc không có space quanh operator ──
++
++    def test_no_space_around_operator_not_join(self):
++        # 'GoiThau<*TCGTTD@key' không match _JOIN_RE (yêu cầu \s+ quanh operator)
++        # → rơi vào nhánh validate_sql_identifier → raise vì có ký tự *
++        with pytest.raises(ValueError, match="Cảnh báo bảo mật"):
++            resolve_sheet_query("GoiThau<*TCGTTD@key")
++
++    def test_one_side_space_not_join(self):
++        # 'GoiThau <*TCGTTD @ key' — thiếu space sau <* → không match _JOIN_RE
++        with pytest.raises(ValueError, match="Cảnh báo bảo mật"):
++            resolve_sheet_query("GoiThau <*TCGTTD @ key")
++
++    # ── Dangerous input → ValueError ──
++
++    def test_raises_on_injection_attempt(self):
++        with pytest.raises(ValueError, match="Cảnh báo bảo mật"):
++            resolve_sheet_query("GoiThau'; DROP TABLE--")
++
++    def test_raises_on_semicolon(self):
++        with pytest.raises(ValueError, match="Cảnh báo bảo mật"):
++            resolve_sheet_query("GoiThau; DROP TABLE GoiThau; --")
++
++    # ── Nhất quán với parse_join_expression ──
++
++    def test_consistent_with_parse_join(self):
++        """resolve_sheet_query khi match join phải cho kết quả = parse_join_expression."""
++        expr = "GoiThau <*> TCGTTD @ GoiThau_ID"
++        assert resolve_sheet_query(expr) == parse_join_expression(expr)
++
++    def test_consistent_select_passthrough(self):
++        expr = "SELECT * FROM GoiThau"
++        assert resolve_sheet_query(expr) == parse_join_expression(expr)
++
++
++# ══════════════════════════════════════════════
++# _parse_repeat_sheet_config
++# ══════════════════════════════════════════════
++
++class TestParseRepeatSheetConfig:
++
++    def test_left_join(self):
++        assert _parse_repeat_sheet_config({"sheet": "GoiThau <* TCGTTD @ GoiThau_ID"}) == (
++            "GoiThau", "TCGTTD", "GoiThau_ID"
++        )
++
++    def test_right_join(self):
++        assert _parse_repeat_sheet_config({"sheet": "GoiThau *> TCGTTD @ GoiThau_ID"}) == (
++            "GoiThau", "TCGTTD", "GoiThau_ID"
++        )
++
++    def test_inner_join(self):
++        assert _parse_repeat_sheet_config({"sheet": "GoiThau * TCGTTD @ GoiThau_ID"}) == (
++            "GoiThau", "TCGTTD", "GoiThau_ID"
++        )
++
++    def test_full_outer_join(self):
++        assert _parse_repeat_sheet_config({"sheet": "GoiThau <*> TCGTTD @ GoiThau_ID"}) == (
++            "GoiThau", "TCGTTD", "GoiThau_ID"
++        )
++
++    def test_different_key_names(self):
++        left, right, key = _parse_repeat_sheet_config(
++            {"sheet": "GoiThau <* TCGTTD @ GoiThau_ID = MemberID"}
++        )
++        assert left == "GoiThau"
++        assert right == "TCGTTD"
++        assert "GoiThau_ID" in key and "MemberID" in key
++
++    def test_simple_sheet_no_join(self):
++        left, right, key = _parse_repeat_sheet_config({"sheet": "GoiThau"})
++        assert left == "GoiThau"
++        assert right == ""
++        assert key == ""
++
++    def test_empty_sheet(self):
++        assert _parse_repeat_sheet_config({"sheet": ""}) == ("", "", "")
++
++    def test_missing_sheet_key(self):
++        assert _parse_repeat_sheet_config({}) == ("", "", "")
++
++    def test_vietnamese_table_names(self):
++        left, right, key = _parse_repeat_sheet_config(
++            {"sheet": "Gói thầu <* Nhà thầu @ GoiThau_ID"}
++        )
++        assert left == "Gói thầu"
++        assert right == "Nhà thầu"
++        assert key == "GoiThau_ID"
++
++    def test_full_outer_not_confused_with_left(self):
++        # <*> phải trả (left, right) đúng, không split lẫn với <*
++        left, right, key = _parse_repeat_sheet_config(
++            {"sheet": "A <*> B @ k"}
++        )
++        assert left == "A"
++        assert right == "B"
++
++    def test_symmetric_roundtrip_via_resolve(self):
++        """left/right từ _parse_repeat_sheet_config phải xuất hiện trong SQL của resolve_sheet_query."""
++        expr = "GoiThau <* TCGTTD @ GoiThau_ID"
++        left, right, _ = _parse_repeat_sheet_config({"sheet": expr})
++        sql = resolve_sheet_query(expr)
++        assert f'"{left}"' in sql
++        assert f'"{right}"' in sql
++
++
++# ══════════════════════════════════════════════
++# _JOIN_RE
++# ══════════════════════════════════════════════
++
++class TestJoinRe:
++    """Kiểm tra regex guard trước khi route vào parse_join_expression."""
++
++    def test_matches_left(self):
++        assert _JOIN_RE.match("GoiThau <* TCGTTD @ GoiThau_ID")
++
++    def test_matches_right(self):
++        assert _JOIN_RE.match("A *> B @ k")
++
++    def test_matches_inner(self):
++        assert _JOIN_RE.match("A * B @ k")
++
++    def test_matches_full_outer(self):
++        assert _JOIN_RE.match("A <*> B @ k")
++
++    def test_no_match_simple_name(self):
++        assert not _JOIN_RE.match("GoiThau")
++
++    def test_no_match_select(self):
++        assert not _JOIN_RE.match("SELECT * FROM GoiThau")
++
++    def test_no_match_no_at(self):
++        assert not _JOIN_RE.match("A <* B")
++
++    def test_no_match_no_space_around_op(self):
++        # Yêu cầu \s+ quanh operator
++        assert not _JOIN_RE.match("A<*B@k")
++        assert not _JOIN_RE.match("GoiThau<*TCGTTD@key")

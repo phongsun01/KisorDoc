@@ -109,6 +109,71 @@ def create_ui():
                     rerun_btn = gr.Button(ui_labels.get("rerun_btn", "← Quay lại"), variant="secondary")
                     retry_btn = gr.Button(ui_labels.get("retry_btn", "🔄 Chạy lại file lỗi"), variant="stop", visible=False)
 
+            with gr.Tab("3. Migrate Template", id=2):
+                gr.Markdown(
+                    "### Chuyển đổi placeholder cũ → Jinja2\n"
+                    "Chuyển `<<TenBien>>` / `<<TenBien.Date>>` / `{DanhMuc}` sang cú pháp `{{TenBien}}` / `{{TenBien_Date|date}}` / `{{DanhMuc}}`."
+                )
+                with gr.Row():
+                    with gr.Column(scale=2):
+                        migrate_folder_input = gr.Textbox(
+                            label="Thư mục template (để trống = dùng thư mục mặc định từ config)",
+                            placeholder=r"VD: C:\KisorDoc\2. Templates\Opt1",
+                        )
+                    with gr.Column(scale=1):
+                        migrate_recursive = gr.Checkbox(label="Quét tất cả thư mục con", value=True)
+                        migrate_backup    = gr.Checkbox(label="Tạo bản backup (.bak.docx)", value=True)
+
+                with gr.Row():
+                    migrate_dryrun_btn = gr.Button("🔍 Phân tích (Dry-run)", variant="secondary")
+                    migrate_run_btn    = gr.Button("⚡ Migrate thật", variant="primary")
+
+                migrate_log = gr.Textbox(
+                    label="Kết quả",
+                    interactive=False,
+                    lines=18,
+                    max_lines=30,
+                )
+                migrate_status = gr.Textbox(label="Trạng thái", interactive=False)
+
+                def _run_migrate(folder_str, recursive, backup, dry_run):
+                    from kisorlib.migrator import migrate_folder, format_summary
+                    log_lines = []
+                    status = "Đang phân tích..." if dry_run else "Đang migrate..."
+
+                    folder = Path(folder_str.strip()) if folder_str.strip() else service.config.template_path
+                    if not folder.exists():
+                        return f"❌ Thư mục không tồn tại: {folder}", "❌ Lỗi"
+
+                    def _on_prog(event):
+                        log_lines.append(event.get("message", ""))
+
+                    results = migrate_folder(
+                        folder,
+                        dry_run=dry_run,
+                        backup=backup,
+                        recursive=recursive,
+                        on_progress=_on_prog,
+                    )
+                    summary = format_summary(results, dry_run=dry_run)
+                    ok    = sum(1 for r in results if r.success and r.changed)
+                    nochg = sum(1 for r in results if r.success and not r.changed)
+                    errs  = sum(1 for r in results if not r.success)
+                    mode  = "[DRY-RUN] " if dry_run else ""
+                    status_msg = f"{mode}✅ {ok} file — ⬜ {nochg} không đổi — ❌ {errs} lỗi"
+                    return summary, status_msg
+
+                migrate_dryrun_btn.click(
+                    fn=lambda f, rec, bak: _run_migrate(f, rec, bak, dry_run=True),
+                    inputs=[migrate_folder_input, migrate_recursive, migrate_backup],
+                    outputs=[migrate_log, migrate_status],
+                )
+                migrate_run_btn.click(
+                    fn=lambda f, rec, bak: _run_migrate(f, rec, bak, dry_run=False),
+                    inputs=[migrate_folder_input, migrate_recursive, migrate_backup],
+                    outputs=[migrate_log, migrate_status],
+                )
+
         def on_package_change(pkg, group):
             opt = _sel["opt"]
             sheet_rows = _sel["sheet_rows"]
