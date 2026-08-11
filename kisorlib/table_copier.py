@@ -43,9 +43,20 @@ def copy_tables_for_file(
     if file_stem.endswith("-Template"):
         file_stem = file_stem[: -len("-Template")]
 
+    def _get_table_pkg_id(t: dict) -> str:
+        if key_id and key_id in t:
+            return str(t[key_id]).strip()
+        for k in ["GoiThau_ID", "MS_GoiThau", "ID"]:
+            if k in t:
+                return str(t[k]).strip()
+        for k, v in t.items():
+            if "goithau" in k.lower() or k.lower() == "id":
+                return str(v).strip()
+        return ""
+
     matching_tables = [
         t for t in tables_data
-        if str(t.get(key_id) if key_id in t else t.get("ID", "")).strip() == goi_thau_id
+        if _get_table_pkg_id(t) == goi_thau_id
         and _match_word(str(t.get("Word", "")), file_stem)
     ]
     if not matching_tables:

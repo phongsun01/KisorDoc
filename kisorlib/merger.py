@@ -6,7 +6,7 @@ from .filters import (
     filter_date, filter_date_long, filter_number, filter_num2text,
     filter_day, filter_month, filter_year, filter_add_days,
     filter_add_months, filter_date_diff, filter_quarter,
-    filter_weekday, filter_date_text
+    filter_weekday, filter_date_text, filter_upper
 )
 
 
@@ -23,6 +23,9 @@ def mail_merge(template_path: Path, context: dict, output_path: Path):
     jenv.filters["date_long"] = filter_date_long
     jenv.filters["number"] = filter_number
     jenv.filters["num2text"] = filter_num2text
+    jenv.filters["filter_num2text"] = filter_num2text
+    jenv.filters["upper"] = filter_upper
+    jenv.filters["filter_upper"] = filter_upper
     jenv.filters["day"] = filter_day
     jenv.filters["month"] = filter_month
     jenv.filters["year"] = filter_year
@@ -58,6 +61,9 @@ def mail_merge_safe(template_path, context: dict, output_path) -> tuple[bool, st
         jenv.filters["date_long"] = filter_date_long
         jenv.filters["number"]    = filter_number
         jenv.filters["num2text"]  = filter_num2text
+        jenv.filters["filter_num2text"] = filter_num2text
+        jenv.filters["upper"] = filter_upper
+        jenv.filters["filter_upper"] = filter_upper
         jenv.filters["day"] = filter_day
         jenv.filters["month"] = filter_month
         jenv.filters["year"] = filter_year

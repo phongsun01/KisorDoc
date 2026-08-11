@@ -4,12 +4,13 @@ import sys
 import traceback
 from pathlib import Path
 import gradio as gr
+import re
 
 from kisorlib.config import load_config
 from kisorlib.dataset import DataSet
 from kisorlib.service import KisorService
 from kisorlib.batch import run_batch, run_retry_batch
-from kisorlib.file_utils import cleanup_old_logs
+from kisorlib.file_utils import cleanup_old_logs, open_folder_single_instance
 from kisorlib.utils import _str, _parse_repeat_key_id, _parse_repeat_sheet_config, resolve_sheet_query, safe_format
 
 ui_labels: dict = {}
@@ -47,7 +48,7 @@ def create_ui():
     _sel = {"opt": "", "pkg": "", "sheet_rows": [], "template_total": 0, "choices": []}
 
     with gr.Blocks(title=ui_labels.get("app_title", "KisorDoc-AI")) as app:
-        gr.Markdown(ui_labels.get("app_title", "KisorDoc-AI – Xử lý tài liệu tự động"))
+        gr.Markdown(f"# **{ui_labels.get('app_title', 'KisorDoc-AI – Xử lý tài liệu tự động')}**")
 
         last_run_state = gr.State(None)
 
@@ -174,6 +175,125 @@ def create_ui():
                     outputs=[migrate_log, migrate_status],
                 )
 
+            with gr.Tab("4. Migrate Text", id=3):
+                gr.Markdown(
+                    "### Chuyển đổi text thô sang Jinja2 Placeholder\n"
+                    "Tìm kiếm các giá trị thực tế trong tài liệu Word (ví dụ: tên đối tác, ngày tháng) và thay bằng placeholder `{{ TenBien }}` dựa trên mapping từ Excel."
+                )
+                with gr.Row():
+                    with gr.Column(scale=2):
+                        text_excel_input = gr.Textbox(
+                            label="Đường dẫn file Excel chứa data mẫu (để trống = tự động tìm trong 1. Data)",
+                            placeholder=r"VD: C:\KisorDoc\1. Data\data.xlsx",
+                        )
+                        text_folder_input = gr.Textbox(
+                            label="Thư mục template (để trống = dùng thư mục mặc định từ config)",
+                            placeholder=r"VD: C:\KisorDoc\2. Templates\Opt1",
+                        )
+                    with gr.Column(scale=1):
+                        text_row_input       = gr.Number(label="Dòng dữ liệu mẫu trong Excel (1-based)", value=1, precision=0)
+                        text_recursive       = gr.Checkbox(label="Quét tất cả thư mục con", value=True)
+                        text_backup          = gr.Checkbox(label="Tạo bản backup (.bak.docx)", value=True)
+                        text_case_sensitive  = gr.Checkbox(label="So khớp phân biệt hoa thường", value=False)
+
+                with gr.Row():
+                    text_dryrun_btn = gr.Button("🔍 Phân tích (Dry-run)", variant="secondary")
+                    text_run_btn    = gr.Button("⚡ Migrate thật", variant="primary")
+
+                text_log = gr.Textbox(
+                    label="Kết quả",
+                    interactive=False,
+                    lines=18,
+                    max_lines=30,
+                )
+                text_status = gr.Textbox(label="Trạng thái", interactive=False)
+
+                def _run_text_migrate(excel_str, folder_str, row_val, recursive, backup, case_sensitive, dry_run):
+                    from kisorlib.text_migrator import load_mapping, text_migrate_folder, text_format_summary
+                    from kisorlib.text_reporter import generate_html_report, generate_excel_report
+                    
+                    log_lines = []
+                    
+                    # 1. Tìm Excel
+                    if not excel_str.strip():
+                        excel_files = sorted(service.config.data_path.glob("*.xlsx"))
+                        excel_files = [f for f in excel_files if not f.name.startswith("~$") and not f.name.startswith(service.config.ExceptionSheet)]
+                        if not excel_files:
+                            return "❌ Không tìm thấy file Excel nào trong thư mục data!", "❌ Lỗi"
+                        excel_path = excel_files[0]
+                    else:
+                        excel_path = Path(excel_str.strip())
+                        
+                    if not excel_path.exists():
+                        return f"❌ File Excel không tồn tại: {excel_path}", "❌ Lỗi"
+
+                    # 2. Tìm Folder
+                    folder = Path(folder_str.strip()) if folder_str.strip() else service.config.template_path
+                    if not folder.exists():
+                        return f"❌ Thư mục template không tồn tại: {folder}", "❌ Lỗi"
+
+                    # 3. Callback log
+                    def _on_prog(event):
+                        log_lines.append(event.get("message", ""))
+
+                    # 4. Load mapping
+                    try:
+                        sorted_mapping, collisions = load_mapping(
+                            excel_path=excel_path,
+                            row_idx=int(row_val),
+                            verbose=False,
+                            on_progress=_on_prog
+                        )
+                    except Exception as e:
+                        return f"❌ Lỗi nạp mapping Excel: {e}", "❌ Lỗi"
+
+                    if not sorted_mapping:
+                        return "⚠️ Không có mapping nào được tải từ Excel. Kiểm tra lại dòng dữ liệu mẫu.", "⚠️ Cảnh báo"
+
+                    # 5. Chạy migrate
+                    results = text_migrate_folder(
+                        folder=folder,
+                        sorted_mapping=sorted_mapping,
+                        dry_run=dry_run,
+                        backup=backup,
+                        recursive=recursive,
+                        case_insensitive=not case_sensitive,
+                        on_progress=_on_prog,
+                    )
+
+                    summary = text_format_summary(results, dry_run=dry_run)
+                    
+                    # Thống kê
+                    ok    = sum(1 for r in results if r.success and r.changed)
+                    nochg = sum(1 for r in results if r.success and not r.changed)
+                    errs  = sum(1 for r in results if not r.success)
+                    mode  = "[DRY-RUN] " if dry_run else ""
+                    status_msg = f"{mode}✅ {ok} file — ⬜ {nochg} không đổi — ❌ {errs} lỗi"
+                    
+                    # 6. Sinh báo cáo nếu là dry_run
+                    if dry_run:
+                        try:
+                            report_dir = Path("reports")
+                            html_path = generate_html_report(results, report_dir, excel_path=str(excel_path), sample_row=int(row_val))
+                            excel_path_ = generate_excel_report(results, report_dir)
+                            summary += f"\n\n📄 Đã xuất HTML Report: {html_path.resolve()}\n📊 Đã xuất Excel Report: {excel_path_.resolve()}"
+                        except Exception as rep_err:
+                            summary += f"\n\n⚠️ Lỗi xuất report: {rep_err}"
+
+                    return summary, status_msg
+
+                text_dryrun_btn.click(
+                    fn=lambda xls, fld, row, rec, bak, cs: _run_text_migrate(xls, fld, row, rec, bak, cs, dry_run=True),
+                    inputs=[text_excel_input, text_folder_input, text_row_input, text_recursive, text_backup, text_case_sensitive],
+                    outputs=[text_log, text_status],
+                )
+                text_run_btn.click(
+                    fn=lambda xls, fld, row, rec, bak, cs: _run_text_migrate(xls, fld, row, rec, bak, cs, dry_run=False),
+                    inputs=[text_excel_input, text_folder_input, text_row_input, text_recursive, text_backup, text_case_sensitive],
+                    outputs=[text_log, text_status],
+                )
+
+
         def on_package_change(pkg, group):
             opt = _sel["opt"]
             sheet_rows = _sel["sheet_rows"]
@@ -299,7 +419,11 @@ def create_ui():
                     show_format = show_format.split("|")[0].strip()
                 if opt_config.get("type") == "Repeat":
                     ls, _, _ = _parse_repeat_sheet_config(opt_config)
-                    sql = f'SELECT * FROM "{ls}"' if ls else resolve_sheet_query(sheet)
+                    where_clause = ""
+                    where_parts = re.split(r'\s+WHERE\s+', sheet, flags=re.IGNORECASE)
+                    if len(where_parts) > 1:
+                        where_clause = " WHERE " + where_parts[1].replace("==", "=").strip()
+                    sql = f'SELECT * FROM "{ls}"{where_clause}' if ls else resolve_sheet_query(sheet)
                     opt_code = opt.split(":")[0].strip() if ":" in opt else opt.strip()
                     try:
                         wf_rows = service.ds.query("SELECT DISTINCT Name FROM Workflow WHERE Option = ?", (opt_code,))
@@ -428,10 +552,9 @@ def create_ui():
 
         def on_open_folder():
             try:
-                import subprocess
                 path = str(service.config.output_path.resolve())
                 if os.path.exists(path):
-                    subprocess.Popen(f'explorer "{path}"', shell=True)
+                    open_folder_single_instance(path)
                     return f"✅ Đã mở thư mục output: {path}"
                 else:
                     return f"❌ Không tìm thấy thư mục output: {path}"
@@ -442,10 +565,9 @@ def create_ui():
 
         def on_open_logs():
             try:
-                import subprocess
                 path = str((Path(service.config.ProjectPath) / "logs").resolve())
                 if os.path.exists(path):
-                    subprocess.Popen(f'explorer "{path}"', shell=True)
+                    open_folder_single_instance(path)
                     return f"✅ Đã mở thư mục log: {path}"
                 else:
                     return f"❌ Không tìm thấy thư mục log: {path}"

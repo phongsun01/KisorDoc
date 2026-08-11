@@ -1,4 +1,16 @@
-﻿# Changelog
+# Changelog
+
+## [5.2.0] - 2026-08-11
+
+### Added
+- **Hỗ trợ WHERE trong cú pháp SQL Join**: Bổ sung hỗ trợ tùy biến thêm điều kiện lọc dữ liệu `WHERE` vào trực tiếp cú pháp join rút gọn (ví dụ: `GoiThau * TCGTTD @ GoiThau_ID WHERE GoiThau.GoiThau_HTDT == 'DTRR'`).
+- **Mở thư mục dạng Single Instance**: Cải tiến chức năng mở thư mục output và log sang dạng Single Instance thông qua PowerShell COM Object (Shell.Application), tự động focus vào cửa sổ đang mở thay vì sinh nhiều cửa sổ mới chồng chéo trên Windows.
+- **Bảo trì và sửa lỗi cốt lõi (10 Bug Fixes)**:
+  - Khắc phục lỗi lọc gói thầu quy trình Repeat khi cấu hình có chứa điều kiện WHERE.
+  - Đăng ký và chuẩn hóa đầy đủ các custom filters (`filter_upper`, `upper`, `filter_num2text`, `num2text`) để tránh crash lỗi `UndefinedError` trên template.
+  - Tích hợp fallback lấy khóa liên kết theo nhiều cột tùy chọn (`GoiThau_ID`, `MS_GoiThau`, `ID`) thay vì hardcode.
+  - Khắc phục lỗi nạp tham số `option` của route `get_packages` trên FastAPI.
+  - Suppress cảnh báo `UserWarning: Data Validation extension is not supported` phiền toái từ thư viện `openpyxl`.
 
 ## [5.1.0] - 2026-08-10
 

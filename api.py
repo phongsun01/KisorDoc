@@ -325,7 +325,7 @@ def get_packages(option: str = Query(..., description="Option key, ví dụ 'Opt
     Mỗi item: {"id": "MS26-01", "label": "01. MS26-01 - Tên gói thầu"}
     """
     try:
-        pkgs = list_packages()
+        pkgs = list_packages(option)
         # list_packages() trả về ID list; label cần query thêm
         # Tạm thời trả id = label, sau bổ sung show_format
         return [{"id": p, "label": p} for p in pkgs]

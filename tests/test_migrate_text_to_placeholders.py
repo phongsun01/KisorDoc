@@ -2,14 +2,32 @@ import os
 import pytest
 from lxml import etree
 from openpyxl import Workbook
-from migrate_text_to_placeholders import (
+from kisorlib.text_migrator import (
     to_slug,
     load_mapping,
-    reconstruct_paragraph_text,
-    find_forbidden_spans,
-    safe_replace_xml,
+    _reconstruct as reconstruct_paragraph_text,
+    _forbidden_spans as find_forbidden_spans,
     NAMESPACES
 )
+
+def safe_replace_xml(p_node, mapping, case_insensitive, dense_threshold, file_logs, file_path):
+    from kisorlib.text_migrator import migrate_paragraph
+    changes = migrate_paragraph(p_node, mapping, case_insensitive=case_insensitive, dense_threshold=dense_threshold, location=file_path)
+    if changes:
+        p_matches = []
+        for c in changes:
+            p_matches.append({
+                'sample': c.original,
+                'placeholder': c.placeholder,
+                'original': c.original
+            })
+        file_logs.append({
+            'original_p': changes[0].paragraph,
+            'matches': p_matches
+        })
+        return True
+    return False
+
 
 def test_to_slug():
     assert to_slug("Họ và Tên") == "Ho_va_Ten"

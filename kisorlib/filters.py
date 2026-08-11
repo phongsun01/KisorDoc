@@ -375,4 +375,7 @@ def filter_date_text(value) -> str:
     except Exception:
         return str(value)
 
-
+def filter_upper(value) -> str:
+    if value is None:
+        return ""
+    return str(value).upper()

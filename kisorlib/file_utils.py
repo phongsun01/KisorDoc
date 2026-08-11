@@ -174,3 +174,53 @@ def open_logs_folder(config: AppConfig):
     except Exception as e:
         print(f"Error opening logs folder: {e}")
 
+
+def open_folder_single_instance(path: str):
+    import subprocess
+    import os
+    from pathlib import Path
+    
+    abs_path = os.path.abspath(path)
+    if not os.path.exists(abs_path):
+        return False
+        
+    escaped_path = abs_path.replace("'", "''").replace("\\", "\\\\")
+    
+    ps_script = f"""
+    $target = "{escaped_path}"
+    $targetPath = [System.IO.Path]::GetFullPath($target).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+    $app = New-Object -ComObject Shell.Application
+    $found = $false
+    foreach ($win in $app.Windows()) {{
+        try {{
+            $url = $win.LocationURL
+            if ($url) {{
+                $uri = New-Object System.Uri($url)
+                if ($uri.IsFile) {{
+                    $localPath = [System.IO.Path]::GetFullPath($uri.LocalPath).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+                    if ($localPath -eq $targetPath) {{
+                        $sig = '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);'
+                        $type = Add-Type -MemberDefinition $sig -Name "Win32" -Namespace "Win32" -PassThru -ErrorAction SilentlyContinue
+                        [Win32.Win32]::ShowWindowAsync($win.HWND, 9) | Out-Null
+                        [Win32.Win32]::SetForegroundWindow($win.HWND) | Out-Null
+                        $found = $true
+                        break
+                    }}
+                }}
+            }}
+        }} catch {{}}
+    }}
+    if (-not $found) {{
+        Start-Process explorer.exe -ArgumentList "`"$target`""
+    }}
+    """
+    try:
+        # Run PowerShell to check and focus existing window, or open new one
+        subprocess.Popen(["powershell", "-NoProfile", "-Command", ps_script], creationflags=0x08000000) # CREATE_NO_WINDOW
+        return True
+    except Exception:
+        # Fallback to standard explorer call if PowerShell fails
+        subprocess.Popen(f'explorer "{abs_path}"', shell=True)
+        return True
+
+

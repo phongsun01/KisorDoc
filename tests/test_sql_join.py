@@ -213,6 +213,14 @@ class TestParseJoinExpression:
         sql = parse_join_expression("A * B @ k")
         assert " ON " in sql
 
+    def test_join_with_where_clause(self):
+        sql = parse_join_expression("GoiThau * TCGTTD @ GoiThau_ID WHERE GoiThau.GoiThau_HTDT == 'DTRR'")
+        assert 'SELECT * FROM "GoiThau" INNER JOIN "TCGTTD" ON "GoiThau"."GoiThau_ID" = "TCGTTD"."GoiThau_ID" WHERE GoiThau.GoiThau_HTDT = \'DTRR\'' in sql
+
+    def test_simple_table_with_where_clause(self):
+        sql = parse_join_expression("GoiThau WHERE GoiThau_HTDT == 'DTRR'")
+        assert 'SELECT * FROM "GoiThau" WHERE GoiThau_HTDT = \'DTRR\'' in sql
+
 
 # ══════════════════════════════════════════════
 # resolve_sheet_query  (trước đây 0 test)
@@ -374,6 +382,14 @@ class TestParseRepeatSheetConfig:
         )
         assert left == "Gói thầu"
         assert right == "Nhà thầu"
+        assert key == "GoiThau_ID"
+
+    def test_parse_repeat_sheet_with_where_clause(self):
+        left, right, key = _parse_repeat_sheet_config(
+            {"sheet": "GoiThau * TCGTTD @ GoiThau_ID WHERE GoiThau.GoiThau_HTDT == 'DTRR'"}
+        )
+        assert left == "GoiThau"
+        assert right == "TCGTTD"
         assert key == "GoiThau_ID"
 
     def test_full_outer_not_confused_with_left(self):

@@ -511,7 +511,11 @@ async def run_batch(
     # Query dòng package
     if opt_config.get("type") == "Repeat":
         ls, _, _ = _parse_repeat_sheet_config(opt_config)
-        temp_sql = f'SELECT * FROM "{ls}"' if ls else resolve_sheet_query(sheet)
+        where_clause = ""
+        where_parts = re.split(r'\s+WHERE\s+', sheet, flags=re.IGNORECASE)
+        if len(where_parts) > 1:
+            where_clause = " WHERE " + where_parts[1].replace("==", "=").strip()
+        temp_sql = f'SELECT * FROM "{ls}"{where_clause}' if ls else resolve_sheet_query(sheet)
     else:
         temp_sql = resolve_sheet_query(sheet)
 

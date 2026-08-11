@@ -133,8 +133,12 @@ class KisorService:
             show_format = show_format.split("|")[0].strip()
         
         if opt_config.get("type") == "Repeat":
-            ls, _, _ = _parse_repeat_sheet_config(opt_config)
-            sql = f'SELECT * FROM "{ls}"' if ls else resolve_sheet_query(sheet)
+            left_sheet, _, _ = _parse_repeat_sheet_config(opt_config)
+            where_clause = ""
+            where_parts = re.split(r'\s+WHERE\s+', sheet, flags=re.IGNORECASE)
+            if len(where_parts) > 1:
+                where_clause = " WHERE " + where_parts[1].replace("==", "=").strip()
+            sql = f'SELECT * FROM "{left_sheet}"{where_clause}' if left_sheet else resolve_sheet_query(sheet)
         else:
             sql = resolve_sheet_query(sheet)
         sort_col = opt_config.get("sort_col", "")
@@ -232,7 +236,11 @@ class KisorService:
             sheet = opt_config.get("sheet", self.config.DataSheet)
             if opt_config.get("type") == "Repeat":
                 left_sheet, _, _ = _parse_repeat_sheet_config(opt_config)
-                sql = f'SELECT * FROM "{left_sheet}"' if left_sheet else resolve_sheet_query(sheet)
+                where_clause = ""
+                where_parts = re.split(r'\s+WHERE\s+', sheet, flags=re.IGNORECASE)
+                if len(where_parts) > 1:
+                    where_clause = " WHERE " + where_parts[1].replace("==", "=").strip()
+                sql = f'SELECT * FROM "{left_sheet}"{where_clause}' if left_sheet else resolve_sheet_query(sheet)
             else:
                 sql = resolve_sheet_query(sheet)
             try:

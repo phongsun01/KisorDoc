@@ -49,8 +49,16 @@ def parse_join_expression(expr: str) -> str:
     s = expr.strip()
     if s.lower().startswith("select"):
         return s
+
+    # Tách phần điều kiện WHERE nếu có (hỗ trợ điều kiện lọc thêm)
+    where_clause = ""
+    where_parts = re.split(r'\s+WHERE\s+', s, flags=re.IGNORECASE)
+    if len(where_parts) > 1:
+        s = where_parts[0].strip()
+        where_clause = " WHERE " + where_parts[1].replace("==", "=").strip()
+
     if "@" not in s:
-        return f'SELECT * FROM "{validate_sql_identifier(s)}"'
+        return f'SELECT * FROM "{validate_sql_identifier(s)}"{where_clause}'
 
     join_part, key_raw = s.split("@", 1)
     join_part = join_part.strip()
@@ -67,7 +75,7 @@ def parse_join_expression(expr: str) -> str:
             break
 
     if not join_type:
-        return f'SELECT * FROM "{validate_sql_identifier(s)}"'
+        return f'SELECT * FROM "{validate_sql_identifier(s)}"{where_clause}'
 
     if "=" in key_raw:
         k1, k2 = [validate_sql_identifier(k.strip()) for k in key_raw.split("=", 1)]
@@ -77,6 +85,7 @@ def parse_join_expression(expr: str) -> str:
     return (
         f'SELECT * FROM "{t1}" {join_type} "{t2}" '
         f'ON "{t1}"."{k1}" = "{t2}"."{k2}"'
+        f'{where_clause}'
     )
 
 
@@ -103,10 +112,14 @@ def _parse_repeat_sheet_config(opt_config: dict) -> tuple[str, str, str]:
     Trả về (left_sheet, right_sheet, join_key).
     """
     sheet_expr = opt_config.get("sheet", "").strip()
-    if "@" not in sheet_expr:
-        return validate_sql_identifier(sheet_expr), "", ""
+    # Tách phần WHERE ra trước khi phân tích cấu trúc bảng/khóa join
+    where_parts = re.split(r'\s+WHERE\s+', sheet_expr, flags=re.IGNORECASE)
+    sheet_expr_clean = where_parts[0].strip()
 
-    join_part, key_raw = sheet_expr.split("@", 1)
+    if "@" not in sheet_expr_clean:
+        return validate_sql_identifier(sheet_expr_clean), "", ""
+
+    join_part, key_raw = sheet_expr_clean.split("@", 1)
     join_part = join_part.strip()
     key_raw   = key_raw.strip()
 
@@ -125,4 +138,4 @@ def _parse_repeat_sheet_config(opt_config: dict) -> tuple[str, str, str]:
                 join_key,
             )
 
-    return validate_sql_identifier(sheet_expr), "", ""
+    return validate_sql_identifier(sheet_expr_clean), "", ""
