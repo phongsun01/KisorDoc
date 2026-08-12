@@ -1,7 +1,7 @@
 # PRD – Word Batch Processor (KisorDoc-AI)
-**Phiên bản:** 5.2.1  
+**Phiên bản:** 5.2.2  
 **Ngày:** 2026-08-12  
-**Trạng thái:** Production Ready (ver5.2.1)
+**Trạng thái:** Production Ready (ver5.2.2)
 
 
 ---
@@ -1127,7 +1127,8 @@ F5 (Version pin)    ← Nice-to-have, làm cuối
 *   **Thư viện Core Migrator (`kisorlib/migrator.py`)**: Gộp toàn bộ logic của các script cũ vào một thư viện duy nhất để hỗ trợ API đồng bộ: `migrate_xml`, `migrate_file`, `migrate_folder`.
 *   **Unit Tests đầy đủ**: Bổ sung bộ unit test toàn diện cho migrator tại `tests/test_migrator.py` đảm bảo các quy tắc chuyển đổi `<<Biến>>` $\rightarrow$ `{{Biến}}` chính xác 100%.
 
-### 15.2 Phiên bản 5.2.0 & 5.2.1: WHERE SQL & Single Instance & Tự động ẩn cột phụ
+### 15.2 Phiên bản 5.2.0, 5.2.1 & 5.2.2: WHERE SQL & Single Instance & Tự động ẩn cột phụ & Chuyển tab tự động
+*   **Tự động chuyển tab sau khi chạy (v5.2.2)**: Cấu hình giao diện tự động chuyển từ tab "1. Chọn & Chạy" sang tab "2. Log & Kết quả" ngay sau khi hoàn tất tiến trình sinh file hoặc chạy lại file lỗi.
 *   **Hỗ trợ WHERE trong cú pháp SQL Join**: Bổ sung cơ chế phân tích cú pháp join rút gọn để tách và chuyển đổi mệnh đề `WHERE` bổ sung (ví dụ: `GoiThau * TCGTTD @ GoiThau_ID WHERE GoiThau.GoiThau_HTDT == 'DTRR'`).
 *   **Khắc phục lọc quy trình Repeat**: Đồng nhất sử dụng câu lệnh SQL đầy đủ thay vì chỉ trích xuất `left_sheet` cho việc lấy danh sách gói thầu chính của quy trình Repeat, giúp áp dụng chính xác các điều kiện `WHERE` trên giao diện UI.
 *   **Mở thư mục dạng Single Instance**: Cải tiến cơ chế mở thư mục output và log sang dạng Single Instance qua PowerShell COM Object (`Shell.Application`), tự động khôi phục và đưa cửa sổ Explorer hiện tại lên foreground thay vì mở thêm nhiều cửa sổ mới. Sửa lỗi đường dẫn chứa khoảng trắng mở nhầm thư mục *Documents* bằng lệnh `Invoke-Item`.

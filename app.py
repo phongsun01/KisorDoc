@@ -548,6 +548,9 @@ def create_ui():
         ).then(
             fn=end_run,
             outputs=[run_btn, stop_btn]
+        ).then(
+            fn=lambda: gr.update(selected=1),
+            outputs=[tabs]
         )
 
         def on_open_folder():
@@ -611,6 +614,9 @@ def create_ui():
         ).then(
             fn=end_run,
             outputs=[run_btn, stop_btn]
+        ).then(
+            fn=lambda: gr.update(selected=1),
+            outputs=[tabs]
         )
 
         stop_btn.click(

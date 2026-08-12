@@ -1,5 +1,10 @@
 # Changelog
 
+## [5.2.2] - 2026-08-12
+
+### Added
+- **Tự động chuyển tab sau khi chạy**: Thiết lập giao diện tự động chuyển từ tab "1. Chọn & Chạy" sang tab "2. Log & Kết quả" ngay sau khi tiến trình chạy chính hoặc chạy lại file lỗi hoàn tất.
+
 ## [5.2.1] - 2026-08-12
 
 ### Added
