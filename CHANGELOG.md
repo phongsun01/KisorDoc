@@ -1,5 +1,11 @@
 # Changelog
 
+## [5.2.1] - 2026-08-12
+
+### Added
+- **Tự động nhận diện và ẩn cột phụ khi copy bảng**: Bổ sung cơ chế tự động ẩn các cột nháp, cột phụ hoặc cột trung gian của Excel (bắt đầu bằng `_`, trùng khớp với các từ khóa `phụ`/`helper`/`temp`/`nháp`/`draft` hoặc chứa các nhãn dạng `[phụ]`/`(phụ)`...) khi thực hiện trích xuất dữ liệu copy sang Word.
+- **Sửa lỗi mở thư mục chứa khoảng trắng**: Chuyển đổi lệnh mở thư mục trong nền Windows sang `Invoke-Item` của PowerShell, khắc phục hoàn toàn sự cố phân tách đối số do khoảng trắng gây ra việc mở nhầm thư mục *Documents*.
+
 ## [5.2.0] - 2026-08-11
 
 ### Added

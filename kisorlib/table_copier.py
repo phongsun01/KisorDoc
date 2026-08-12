@@ -211,6 +211,19 @@ def _read_excel_range(xlsx_path: Path, sheet_name: str, range_spec: str, hide_co
             for c in range(min_col, max_col + 1)
         }
         hidden_cols = _parse_hidden_cols(hide_cols, min_col, max_col, header_row)
+        
+        # Tự động ẩn các cột phụ (bắt đầu bằng '_' hoặc có tên chứa [phụ]/[helper]/temp/nháp/draft)
+        auto_hidden_cols = set()
+        for header_name, col_idx in header_row.items():
+            h_clean = header_name.strip()
+            h_lower = h_clean.lower()
+            if (
+                h_clean.startswith("_")
+                or h_lower in ("phụ", "helper", "temp", "nháp", "draft")
+                or any(p in h_lower for p in ["[phụ]", "(phụ)", "[helper]", "(helper)", "[temp]", "(temp)", "[nháp]", "(nháp)"])
+            ):
+                auto_hidden_cols.add(col_idx)
+        hidden_cols = hidden_cols.union(auto_hidden_cols)
         visible_cols = [c for c in range(min_col, max_col + 1) if c not in hidden_cols]
         col_map = {orig: new for new, orig in enumerate(visible_cols)}
 

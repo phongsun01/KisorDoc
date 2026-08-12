@@ -211,7 +211,7 @@ def open_folder_single_instance(path: str):
         }} catch {{}}
     }}
     if (-not $found) {{
-        Start-Process explorer.exe -ArgumentList "`"$target`""
+        Invoke-Item $target
     }}
     """
     try:
