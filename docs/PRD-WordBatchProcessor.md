@@ -1,7 +1,7 @@
 # PRD – Word Batch Processor (KisorDoc-AI)
-**Phiên bản:** 5.0.0  
-**Ngày:** 2026-08-07  
-**Trạng thái:** Production Ready (ver5.0.0)
+**Phiên bản:** 5.2.1  
+**Ngày:** 2026-08-12  
+**Trạng thái:** Production Ready (ver5.2.1)
 
 
 ---
@@ -1119,6 +1119,17 @@ F5 (Version pin)    ← Nice-to-have, làm cuối
 *   **Bảo mật SQL UI:** Chuyển đổi gọi query lấy tên nhóm lặp trong `app.py` sang dạng Parameterized Query `?`.
 *   **Đồng bộ hóa bảng lặp tạm thời:** Áp dụng `_safe_table_name` cho các truy vấn bảng lặp `_Goc` trong `kisorlib/service.py` để tương thích với tên sheet tiếng Việt có dấu/khoảng trắng.
 
+---
 
+## 15. Các cập nhật trong Phiên bản 5.1.x & 5.2.x (2026-08-10 đến 2026-08-12)
 
+### 15.1 Phiên bản 5.1.0: Core Migrator Mới
+*   **Thư viện Core Migrator (`kisorlib/migrator.py`)**: Gộp toàn bộ logic của các script cũ vào một thư viện duy nhất để hỗ trợ API đồng bộ: `migrate_xml`, `migrate_file`, `migrate_folder`.
+*   **Unit Tests đầy đủ**: Bổ sung bộ unit test toàn diện cho migrator tại `tests/test_migrator.py` đảm bảo các quy tắc chuyển đổi `<<Biến>>` $\rightarrow$ `{{Biến}}` chính xác 100%.
 
+### 15.2 Phiên bản 5.2.0 & 5.2.1: WHERE SQL & Single Instance & Tự động ẩn cột phụ
+*   **Hỗ trợ WHERE trong cú pháp SQL Join**: Bổ sung cơ chế phân tích cú pháp join rút gọn để tách và chuyển đổi mệnh đề `WHERE` bổ sung (ví dụ: `GoiThau * TCGTTD @ GoiThau_ID WHERE GoiThau.GoiThau_HTDT == 'DTRR'`).
+*   **Khắc phục lọc quy trình Repeat**: Đồng nhất sử dụng câu lệnh SQL đầy đủ thay vì chỉ trích xuất `left_sheet` cho việc lấy danh sách gói thầu chính của quy trình Repeat, giúp áp dụng chính xác các điều kiện `WHERE` trên giao diện UI.
+*   **Mở thư mục dạng Single Instance**: Cải tiến cơ chế mở thư mục output và log sang dạng Single Instance qua PowerShell COM Object (`Shell.Application`), tự động khôi phục và đưa cửa sổ Explorer hiện tại lên foreground thay vì mở thêm nhiều cửa sổ mới. Sửa lỗi đường dẫn chứa khoảng trắng mở nhầm thư mục *Documents* bằng lệnh `Invoke-Item`.
+*   **Tự động ẩn cột phụ khi copy bảng**: Tích hợp thuật toán tự động lọc bỏ các cột nháp, cột phụ (bắt đầu bằng ký tự `_`, khớp với các từ khóa `phụ`/`helper`/`temp`/`nháp`/`draft` hoặc chứa nhãn dạng `[phụ]`/`(phụ)`...) khi trích xuất copy bảng từ Excel sang Word.
+*   **Đăng ký bộ lọc Jinja2 tương thích**: Đăng ký và map đầy đủ các custom filters (`filter_upper` / `upper`, `filter_num2text` / `num2text`) trong `merger.py` để tránh lỗi `UndefinedError` trên template.
